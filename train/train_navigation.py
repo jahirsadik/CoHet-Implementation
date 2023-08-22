@@ -131,6 +131,13 @@ def train(
                 if model_name == "GPPO"
                 else fcnet_model_config,
             },
+            # "dyn_config": {
+            #     "fcnet_hiddens": [128, 128],
+            #     "fcnet_activation": "relu",
+            #     "post_fcnet_hiddens": [],
+            #     "post_fcnet_activation": None,
+            #     "optim_lr": 3e-4,
+            # },
             "env_config": {
                 "device": "cpu",
                 "num_envs": num_envs_per_worker,
@@ -181,7 +188,7 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=True,
-            heterogeneous=False,
+            heterogeneous=True,
             # Other model
             centralised_critic=False,
             use_mlp=False,

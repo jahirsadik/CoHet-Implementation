@@ -8,7 +8,7 @@ PyTorch's policy class used for PPO.
 import logging
 from abc import ABC
 from typing import Dict
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple, Iterable
 from typing import Type
 
 import gym
@@ -29,6 +29,7 @@ from ray.rllib.execution.train_ops import (
     multi_gpu_train_one_step,
 )
 from ray.rllib.models import ModelV2, ActionDistribution
+from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
 from ray.rllib.policy.policy import Policy
 from ray.rllib.policy.sample_batch import (
     SampleBatch,
@@ -40,7 +41,7 @@ from ray.rllib.policy.torch_mixins import (
     KLCoeffMixin,
     EntropyCoeffSchedule,
 )
-from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
+from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2, torch
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.metrics import (
@@ -58,8 +59,10 @@ from ray.rllib.utils.torch_utils import (
     explained_variance,
     sequence_mask,
 )
-from ray.rllib.utils.typing import AgentID, TensorType, ResultDict
+from ray.rllib.utils.typing import AgentID, TensorType, ResultDict, TrainerConfigDict
 from ray.rllib.utils.typing import PolicyID, SampleBatchType
+
+from models.dynamics import FullyConnectedNetwork
 
 torch, nn = try_import_torch()
 
@@ -375,6 +378,26 @@ def ppo_surrogate_loss(
 
     return total_loss
 
+def build_dyn_model(
+    policy: Policy,
+    obs_space: gym.spaces.Space,
+    action_space: gym.spaces.Space,
+    config: TrainerConfigDict,
+) -> Tuple[ModelV2, Type[TorchDistributionWrapper]]:
+    num_outputs = config['world_model_output_dim'] if 'world_model_output_dim' in config else int(np.product(obs_space.shape))
+    model = FullyConnectedNetwork(
+        obs_space, action_space, num_outputs, config, name="fcnet", 
+        input_dim=int(np.product(obs_space.shape)) + 1
+    )
+    return model
+
+def build_dyn_optimizer(params: Iterable, learning_rate: float, eps: float=1e-7):
+    return torch.optim.Adam(
+        params=params,
+        lr=learning_rate,
+        eps=eps,  # to match tf.keras.optimizers.Adam's epsilon default
+    )
+    
 
 class MultiAgentValueNetworkMixin:
     """Assigns the `_value()` method to a TorchPolicy.
@@ -422,8 +445,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
+        print('pasa ar putki')
         validate_config(config)
-
         TorchPolicyV2.__init__(
             self,
             observation_space,
@@ -440,9 +463,24 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         )
         KLCoeffMixin.__init__(self, config)
         self.grad_gnorm = 0
+        
+        # print(f'config: {config}')
+        self.dyn_models = [build_dyn_model(self, observation_space, action_space[idx], config) for idx in range(len(action_space))]
+        # self.dyn_model_optims = [build_dyn_optimizer(self.dyn_models[idx].parameters(), config["dyn_config"]["actor_learning_rate"]) for idx in range(len(action_space))]
+
+        # print(f'dyn_models: {[self.dyn_models[idx].parameters() for idx in range(len(action_space))]}')
 
         # TODO: Don't require users to call this manually.
         self._initialize_loss_from_dummy_batch()
+
+    # @override(TorchPolicyV2)
+    # def optimizer(
+    #     self,
+    # ) -> Union[List["torch.optim.Optimizer"], "torch.optim.Optimizer"]:
+    #     super_optims = super.optimizer()
+    #     if isinstance(super_optims, list):
+    #         return super_optims + self.dyn_model_optims
+    #     return [super_optims] + self.dyn_model_optims
 
     @override(PPOTorchPolicy)
     def loss(self, model, dist_class, train_batch):
@@ -476,11 +514,11 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             for agent_t, agent_t1 in zip(neighbors_t, neighbors_t1):
                 common_neighbors.append(list(set(agent_t) & set(agent_t1)))
             common_neighbors_batch.append(common_neighbors)
-        for i, j, k in zip(neighbors_t_batch, neighbors_t1_batch, common_neighbors_batch):
-            if i != j:
-                print(f"Batch_neighbors_t: {i}")
-                print(f"Batch_neighbors_t1: {j}")
-                print(f"Common_neighbors: {k}")
+        # for i, j, k in zip(neighbors_t_batch, neighbors_t1_batch, common_neighbors_batch):
+        #     if i != j:
+        #         print(f"Batch_neighbors_t: {i}")
+        #         print(f"Batch_neighbors_t1: {j}")
+        #         print(f"Common_neighbors: {k}")
         # print(f'other agents shape: {other_agent_batches.shape}')
         # Do all post-processing always with no_grad().
         # Not using this here will introduce a memory leak
@@ -523,7 +561,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 "entropy_coeff": self.entropy_coeff,
                 "grad_gnorm": self.grad_gnorm,
             }
-        )
+        )   
 
 
 class MultiPPOTrainer(PPOTrainer, ABC):
@@ -565,7 +603,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
         if self.workers.remote_workers():
             with self._timers[SYNCH_WORKER_WEIGHTS_TIMER]:
                 self.workers.sync_weights(global_vars=global_vars)
-
+                
         # For each policy: update KL scale and warn about possible issues
         for policy_id, policy_info in train_results.items():
             # Update KL loss with dynamic scaling

@@ -63,6 +63,12 @@ def train(
                     "use_beta": use_beta,
                 },
             },
+            "dyn_config": {
+                "fcnet_hiddens": [128, 128],
+                "fcnet_activation": "relu",
+                "post_fcnet_hiddens": [],
+                "post_fcnet_activation": None,
+            },
             "env_config": {
                 "world_shape": [5, 5],
                 "n_agents": 3,
