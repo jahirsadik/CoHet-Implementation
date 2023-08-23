@@ -1,7 +1,7 @@
 #  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
-
+import heartrate; heartrate.trace(files=all, browser=True)
 import os
 import pickle
 

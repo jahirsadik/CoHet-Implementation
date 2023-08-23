@@ -61,6 +61,7 @@ from ray.rllib.utils.torch_utils import (
 )
 from ray.rllib.utils.typing import AgentID, TensorType, ResultDict, TrainerConfigDict
 from ray.rllib.utils.typing import PolicyID, SampleBatchType
+from rllib_differentiable_comms.utils import to_torch
 
 from models.dynamics import FullyConnectedNetwork
 
@@ -248,6 +249,12 @@ def ppo_surrogate_loss(
         Union[TensorType, List[TensorType]]: A single loss tensor or a list
             of loss tensors.
     """
+    # print(f"SAMPLE BATCH INFOS: {train_batch[SampleBatch.INFOS]}")
+    
+    print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
+    print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
+
+
     logits, state = model(train_batch)
     # logits has shape (BATCH, num_agents * num_outputs_per_agent)
     curr_action_dist = dist_class(logits, model)
@@ -295,8 +302,14 @@ def ppo_surrogate_loss(
 
     loss_data = []
     n_agents = len(policy.action_space)
-    for i in range(n_agents):
 
+    print(f"batch shape: {train_batch[SampleBatch.OBS].shape}")
+    for i in range(n_agents):
+        print(f"batch obs {i} shape: {train_batch[SampleBatch.OBS].shape}")
+        # print(f"batch obs {i} shape: {train_batch[SampleBatch.OBS][0]}")
+
+        
+    for i in range(n_agents):
         surrogate_loss = torch.min(
             train_batch[Postprocessing.ADVANTAGES][..., i] * logp_ratio[..., i],
             train_batch[Postprocessing.ADVANTAGES][..., i]
@@ -355,6 +368,24 @@ def ppo_surrogate_loss(
                 "vf_explained_var": vf_explained_var,
             }
         )
+
+
+    # WM related stuff
+    wm_batch = train_batch.copy()
+    # print(f"wm_batch 0th idx all obs shape: {wm_batch[SampleBatch.OBS][0]}")
+    # print(f"wm_batch 0th idx one agent act shape: {wm_batch[SampleBatch.ACTIONS][0]}")
+
+    
+    obs_act_all_agents = np.concatenate((
+        train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
+        train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
+        axis=2)
+    inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+    # print(f"obs_act_all_agents {obs_act_all_agents[0]}")
+    # print(f"inputs {inputs[0]}")
+    # wm_batch[SampleBatch.OBS] = inputs
+    # new_obs_pred, _ = wm({"obs": inputs})
+
 
     aggregation = torch.mean
     total_loss = aggregation(torch.stack([o["total_loss"] for o in loss_data]))
