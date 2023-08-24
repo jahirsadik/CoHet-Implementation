@@ -10,8 +10,9 @@ from abc import ABC
 from typing import Dict
 from typing import List, Optional, Union, Tuple, Iterable
 from typing import Type
-
+import torch.nn as nn
 import gym
+from gym.spaces import Discrete, Box
 import numpy as np
 import ray
 from ray.rllib.agents.ppo import PPOTrainer
@@ -65,6 +66,7 @@ from rllib_differentiable_comms.utils import to_torch
 
 from models.dynamics import FullyConnectedNetwork
 
+nn_functional = nn.functional
 torch, nn = try_import_torch()
 
 logger = logging.getLogger(__name__)
@@ -371,43 +373,56 @@ def ppo_surrogate_loss(
 
 
     # WM related stuff
-    wm_batch = train_batch.copy()
-    # print(f"wm_batch 0th idx all obs shape: {wm_batch[SampleBatch.OBS][0]}")
-    # print(f"wm_batch 0th idx one agent act shape: {wm_batch[SampleBatch.ACTIONS][0]}")
-
-    
+    # wm_batch = train_batch.copy()    
     obs_act_all_agents = np.concatenate((
         train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
         train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
         axis=2)
+    
     inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-    # print(f"obs_act_all_agents {obs_act_all_agents[0]}")
-    # print(f"inputs {inputs[0]}")
-    # wm_batch[SampleBatch.OBS] = inputs
-    # new_obs_pred, _ = wm({"obs": inputs})
-
+    pred_next_obs_all = []
+    states_all = [] 
+    for i in range(n_agents):
+        pred_next_obs_i, state = policy.dyn_models[i]({SampleBatch.OBS: inputs[:, i, :]})  # will crash
+        print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
+        pred_next_obs_all.append(pred_next_obs_i)
+        # states_all.append(state_i)
+    
+    # won't work now
+    dyn_models_loss = []
+    next_obs_reshaped = train_batch[SampleBatch.NEXT_OBS].reshape((train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1))
+    for i, pred_next_obs in enumerate(pred_next_obs_all):
+        print(f'')
+        agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
+        print(f"AMMAJAAN: {agent_i_dyn_loss}")
+        dyn_models_loss.append(agent_i_dyn_loss)
 
     aggregation = torch.mean
-    total_loss = aggregation(torch.stack([o["total_loss"] for o in loss_data]))
+    total_loss = aggregation(torch.stack([ld["total_loss"] for ld in loss_data]))
 
     model.tower_stats["total_loss"] = total_loss
     model.tower_stats["mean_policy_loss"] = aggregation(
-        torch.stack([o["mean_policy_loss"] for o in loss_data])
+        torch.stack([ld["mean_policy_loss"] for ld in loss_data])
     )
     model.tower_stats["mean_vf_loss"] = aggregation(
-        torch.stack([o["mean_vf_loss"] for o in loss_data])
+        torch.stack([ld["mean_vf_loss"] for ld in loss_data])
     )
     model.tower_stats["vf_explained_var"] = aggregation(
-        torch.stack([o["vf_explained_var"] for o in loss_data])
+        torch.stack([ld["vf_explained_var"] for ld in loss_data])
     )
     model.tower_stats["mean_entropy"] = aggregation(
-        torch.stack([o["mean_entropy"] for o in loss_data])
+        torch.stack([ld["mean_entropy"] for ld in loss_data])
     )
     model.tower_stats["mean_kl_loss"] = aggregation(
-        torch.stack([o["mean_kl"] for o in loss_data])
+        torch.stack([ld["mean_kl"] for ld in loss_data])
     )
+    model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
 
+    print(f'dyn_models_loss: {dyn_models_loss}')
+
+    # return aggregation(torch.stack([total_loss] + dyn_models_loss))
     return total_loss
+
 
 def build_dyn_model(
     policy: Policy,
@@ -416,9 +431,20 @@ def build_dyn_model(
     config: TrainerConfigDict,
 ) -> Tuple[ModelV2, Type[TorchDistributionWrapper]]:
     num_outputs = config['world_model_output_dim'] if 'world_model_output_dim' in config else int(np.product(obs_space.shape))
+    print(f'obs_space: {obs_space.shape}')
+    input_dim = obs_space.shape[0]
+    print(f'input_dim: {input_dim}')
     model = FullyConnectedNetwork(
-        obs_space, action_space, num_outputs, config, name="fcnet", 
-        input_dim=int(np.product(obs_space.shape)) + 1
+        obs_space, action_space, (obs_space.shape[0] - action_space.shape[0]),
+            model_config={
+                    "fcnet_hiddens": [128, 128],
+                    "fcnet_activation": "relu",
+                    "post_fcnet_hiddens": [],
+                    "post_fcnet_activation": None,
+                    "optim_lr": 3e-4,
+                },
+            name="fcnet", 
+            input_dim=input_dim
     )
     return model
 
@@ -446,7 +472,7 @@ class MultiAgentValueNetworkMixin:
         # observation.
         if config["use_gae"]:
             # Input dict is provided to us automatically via the Model's
-            # requirements. It's a single-timestep (last one in trajectory)
+            # requirements. It's a single-timestep (last on e in trajectory)
             # input_dict.
             def value(**input_dict):
                 """This is exactly the as in PPOTorchPolicy,
@@ -476,7 +502,11 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
-        print('pasa ar putki')
+
+        self.dyn_models = [build_dyn_model(self, Box(low=-10.0, high=10.0, shape=(20,)), action_space[idx], config) for idx in range(len(action_space))]
+        self.dyn_model_optims = [build_dyn_optimizer(self.dyn_models[idx].parameters(), 3e-4) for idx in range(len(action_space))]
+        print(f'dyn_model_optims: {self.dyn_model_optims}')
+
         validate_config(config)
         TorchPolicyV2.__init__(
             self,
@@ -485,7 +515,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             config,
             max_seq_len=config["model"]["max_seq_len"],
         )
-
         # Only difference from ray code
         MultiAgentValueNetworkMixin.__init__(self, config)
         LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
@@ -494,24 +523,28 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         )
         KLCoeffMixin.__init__(self, config)
         self.grad_gnorm = 0
-        
         # print(f'config: {config}')
-        self.dyn_models = [build_dyn_model(self, observation_space, action_space[idx], config) for idx in range(len(action_space))]
-        # self.dyn_model_optims = [build_dyn_optimizer(self.dyn_models[idx].parameters(), config["dyn_config"]["actor_learning_rate"]) for idx in range(len(action_space))]
-
         # print(f'dyn_models: {[self.dyn_models[idx].parameters() for idx in range(len(action_space))]}')
 
         # TODO: Don't require users to call this manually.
         self._initialize_loss_from_dummy_batch()
 
-    # @override(TorchPolicyV2)
-    # def optimizer(
-    #     self,
-    # ) -> Union[List["torch.optim.Optimizer"], "torch.optim.Optimizer"]:
-    #     super_optims = super.optimizer()
-    #     if isinstance(super_optims, list):
-    #         return super_optims + self.dyn_model_optims
-    #     return [super_optims] + self.dyn_model_optims
+    @override(TorchPolicyV2)
+    def optimizer(
+        self,
+    ) -> Union[List["torch.optim.Optimizer"], "torch.optim.Optimizer"]:
+        if hasattr(self, "config"):
+            optimizers = [
+                torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
+            ]
+        else:
+            optimizers = [torch.optim.Adam(self.model.parameters())]
+        if getattr(self, "exploration", None):
+            optimizers = self.exploration.get_exploration_optimizer(optimizers)
+        print(f'optimizers: {optimizers}')
+        if isinstance(optimizers, list):
+            return optimizers + self.dyn_model_optims
+        return [optimizers] + self.dyn_model_optims
 
     @override(PPOTorchPolicy)
     def loss(self, model, dist_class, train_batch):
