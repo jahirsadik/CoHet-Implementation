@@ -12,6 +12,7 @@ from typing import List, Optional, Union, Tuple, Iterable
 from typing import Type
 import torch.nn as nn
 import gym
+from torch.optim import Adam
 from gym.spaces import Discrete, Box
 import numpy as np
 import ray
@@ -64,7 +65,7 @@ from ray.rllib.utils.typing import AgentID, TensorType, ResultDict, TrainerConfi
 from ray.rllib.utils.typing import PolicyID, SampleBatchType
 from rllib_differentiable_comms.utils import to_torch
 
-from models.dynamics import FullyConnectedNetwork
+from models.dynamics import WorldModel
 
 nn_functional = nn.functional
 torch, nn = try_import_torch()
@@ -304,12 +305,6 @@ def ppo_surrogate_loss(
 
     loss_data = []
     n_agents = len(policy.action_space)
-
-    print(f"batch shape: {train_batch[SampleBatch.OBS].shape}")
-    for i in range(n_agents):
-        print(f"batch obs {i} shape: {train_batch[SampleBatch.OBS].shape}")
-        # print(f"batch obs {i} shape: {train_batch[SampleBatch.OBS][0]}")
-
         
     for i in range(n_agents):
         surrogate_loss = torch.min(
@@ -373,7 +368,6 @@ def ppo_surrogate_loss(
 
 
     # WM related stuff
-    # wm_batch = train_batch.copy()    
     obs_act_all_agents = np.concatenate((
         train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
         train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
@@ -381,19 +375,20 @@ def ppo_surrogate_loss(
     
     inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
     pred_next_obs_all = []
-    states_all = [] 
     for i in range(n_agents):
-        pred_next_obs_i, state = policy.dyn_models[i]({SampleBatch.OBS: inputs[:, i, :]})  # will crash
+        pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])  # will crash
         print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
         pred_next_obs_all.append(pred_next_obs_i)
         # states_all.append(state_i)
     
-    # won't work now
+    assert n_agents == len(pred_next_obs_all)
+
     dyn_models_loss = []
-    next_obs_reshaped = train_batch[SampleBatch.NEXT_OBS].reshape((train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1))
     for i, pred_next_obs in enumerate(pred_next_obs_all):
-        print(f'')
         agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
+        policy.dyn_models[i].zero_grad()
+        agent_i_dyn_loss.backward()
+        policy.dyn_model_optims[i].step()
         print(f"AMMAJAAN: {agent_i_dyn_loss}")
         dyn_models_loss.append(agent_i_dyn_loss)
 
@@ -424,37 +419,6 @@ def ppo_surrogate_loss(
     return total_loss
 
 
-def build_dyn_model(
-    policy: Policy,
-    obs_space: gym.spaces.Space,
-    action_space: gym.spaces.Space,
-    config: TrainerConfigDict,
-) -> Tuple[ModelV2, Type[TorchDistributionWrapper]]:
-    num_outputs = config['world_model_output_dim'] if 'world_model_output_dim' in config else int(np.product(obs_space.shape))
-    print(f'obs_space: {obs_space.shape}')
-    input_dim = obs_space.shape[0]
-    print(f'input_dim: {input_dim}')
-    model = FullyConnectedNetwork(
-        obs_space, action_space, (obs_space.shape[0] - action_space.shape[0]),
-            model_config={
-                    "fcnet_hiddens": [128, 128],
-                    "fcnet_activation": "relu",
-                    "post_fcnet_hiddens": [],
-                    "post_fcnet_activation": None,
-                    "optim_lr": 3e-4,
-                },
-            name="fcnet", 
-            input_dim=input_dim
-    )
-    return model
-
-def build_dyn_optimizer(params: Iterable, learning_rate: float, eps: float=1e-7):
-    return torch.optim.Adam(
-        params=params,
-        lr=learning_rate,
-        eps=eps,  # to match tf.keras.optimizers.Adam's epsilon default
-    )
-    
 
 class MultiAgentValueNetworkMixin:
     """Assigns the `_value()` method to a TorchPolicy.
@@ -502,10 +466,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
-
-        self.dyn_models = [build_dyn_model(self, Box(low=-10.0, high=10.0, shape=(20,)), action_space[idx], config) for idx in range(len(action_space))]
-        self.dyn_model_optims = [build_dyn_optimizer(self.dyn_models[idx].parameters(), 3e-4) for idx in range(len(action_space))]
-        print(f'dyn_model_optims: {self.dyn_model_optims}')
+        obs_dim = observation_space.shape[0] // len(action_space)
+        act_dim = action_space[0].shape[0]
+        self.dyn_models = [WorldModel(len(action_space), 2, (obs_dim + act_dim), obs_dim, 128, device=config["env_config"]["device"]).to(config["env_config"]["device"])
+                        for _ in range(len(action_space))]
+        # adam optimiser to dynamics model as well
+        # use the actor learning rate
+        self.dyn_model_optims = [Adam(dyn_model.parameters()) for dyn_model in self.dyn_models]
 
         validate_config(config)
         TorchPolicyV2.__init__(
@@ -523,28 +490,9 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         )
         KLCoeffMixin.__init__(self, config)
         self.grad_gnorm = 0
-        # print(f'config: {config}')
-        # print(f'dyn_models: {[self.dyn_models[idx].parameters() for idx in range(len(action_space))]}')
 
         # TODO: Don't require users to call this manually.
         self._initialize_loss_from_dummy_batch()
-
-    @override(TorchPolicyV2)
-    def optimizer(
-        self,
-    ) -> Union[List["torch.optim.Optimizer"], "torch.optim.Optimizer"]:
-        if hasattr(self, "config"):
-            optimizers = [
-                torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
-            ]
-        else:
-            optimizers = [torch.optim.Adam(self.model.parameters())]
-        if getattr(self, "exploration", None):
-            optimizers = self.exploration.get_exploration_optimizer(optimizers)
-        print(f'optimizers: {optimizers}')
-        if isinstance(optimizers, list):
-            return optimizers + self.dyn_model_optims
-        return [optimizers] + self.dyn_model_optims
 
     @override(PPOTorchPolicy)
     def loss(self, model, dist_class, train_batch):

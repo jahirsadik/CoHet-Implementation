@@ -1,157 +1,72 @@
-# coding=utf-8
-# Copyright 2019 Google LLC
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""
-Additional models
-"""
-
-import logging
-from typing import Optional
+import torch
 import numpy as np
-import gym
+import torch.nn.functional as F
 
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.models.torch.misc import SlimFC, AppendBiasLayer, \
-    normc_initializer
-from ray.rllib.utils.annotations import override
-from ray.rllib.utils.framework import try_import_torch
-from ray.rllib.utils.typing import Dict, TensorType, List, ModelConfigDict
+from typing import Dict
+from torch import nn
+from torch.optim import Adam
+from tianshou.data import to_torch, Batch
 
-torch, nn = try_import_torch()
+class WorldModel(nn.Module):
+    def __init__(self, num_agent, layer_num, input_dim, output_dim, hidden_units=128, device='cpu', wm_noise_level=0.0):
+        super().__init__()
+        self.device = device
+        # plus one for the action
+        self.model = [
+            nn.Linear(input_dim, hidden_units),  # change here diggu
+            nn.ReLU()]
+        # this is code for the dynamics model MLP
+        # default is input -> hidden layer -> hidden layer -> output layer
+        for _ in range(layer_num - 1):
+            self.model += [nn.Linear(hidden_units, hidden_units), nn.ReLU()]
+        self.model += [nn.Linear(hidden_units, np.prod(output_dim))]
+        self.num_agent = num_agent
+        self.model = nn.Sequential(*self.model)
+        self.optim = Adam(self.model.parameters(), lr=1e-3)
+        self.wm_noise_level = wm_noise_level
 
-logger = logging.getLogger(__name__)
+    # forward pass
+    # https://pytorch.org/tutorials/beginner/former_torchies/nnft_tutorial.html
+    def forward(self, s, **kwargs):
+        s = to_torch(s, device=self.device, dtype=torch.float)
+        batch = s.shape[0]
+        # view is a guaranteed no-copy reshape
+        # -1 means infer the other dimension
+        # https://stackoverflow.com/questions/50792316/what-does-1-mean-in-pytorch-view
+        s = s.view(batch, -1)
+        logits = self.model(s)  # "In context of deep learning the logits layer means the layer that feeds in to softmax (or other such normalization)"
+        # torch.normal samples from a normal dist using a mean and stddev
+        # mean here is 0 and the wm_noise_level arg itself is the stddev
+        if self.wm_noise_level != 0.0:
+            logits += torch.normal(torch.zeros(logits.size()), self.wm_noise_level).to(logits.device)
+        return logits
 
-class FullyConnectedNetwork(TorchModelV2, nn.Module):
-    """Generic fully connected network."""
+    # this function could not be more obvious
+    def learn(self, batch: Batch, **kwargs) -> Dict[str, float]:
+        total_loss = np.zeros(self.num_agent)
+        for i in range(self.num_agent):
+            # concatenating each agent's observation and action
+            inputs = np.concatenate((batch.obs[:, i], np.expand_dims(batch.act[:, i], axis=-1)), axis=1)
+            next_obs_pred = self.model(to_torch(inputs, device=self.device, dtype=torch.float))
+            true_next_obs = to_torch(batch.obs_next[:, i], device=self.device, dtype=torch.float)
+            loss = F.mse_loss(next_obs_pred, true_next_obs)
+            # zero out the gradient before backprop
+            # the batch will affect the policy and it will already affect subsequent batches
+            # no need to accumulate the gradient across multiple batches if not RNN
+            # https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch
+            self.optim.zero_grad()
+            loss.backward()  # backprop
+            self.optim.step()  # update the params https://pytorch.org/docs/stable/optim.html#taking-an-optimization-step
 
-    def __init__(self, obs_space,
-                 action_space, num_outputs: int,
-                 model_config: ModelConfigDict, name: str, 
-                 input_dim: Optional[int] = None):
-        TorchModelV2.__init__(self, obs_space, action_space, num_outputs,
-                              model_config, name)
-        nn.Module.__init__(self)
+            # mse_loss returns a tensor with a single 1D value
+            # this gets that value as a number
+            total_loss[i] = loss.item()
+        # pass in dummy state and action
+        output = {}
+        for i in range(self.num_agent):
+            output[f'models/actor_{i}'] = total_loss[i]
+        output[f'loss/world_model'] = total_loss.sum()
+        return output
 
-        hiddens = list(model_config.get("fcnet_hiddens", [])) + \
-            list(model_config.get("post_fcnet_hiddens", []))
-        activation = model_config.get("fcnet_activation")
-        if not model_config.get("fcnet_hiddens", []):
-            activation = model_config.get("post_fcnet_activation")
-        no_final_linear = model_config.get("no_final_linear")
-        self.vf_share_layers = model_config.get("vf_share_layers")
-        self.free_log_std = model_config.get("free_log_std")
-        # Generate free-floating bias variables for the second half of
-        # the outputs.
-        if self.free_log_std:
-            assert num_outputs % 2 == 0, (
-                "num_outputs must be divisible by two", num_outputs)
-            num_outputs = num_outputs // 2
 
-        layers = []
-        prev_layer_size = input_dim if input_dim else int(np.product(obs_space.shape))
-        self._logits = None
 
-        # Create layers 0 to second-last.
-        for size in hiddens[:-1]:
-            layers.append(
-                SlimFC(
-                    in_size=prev_layer_size,
-                    out_size=size,
-                    initializer=normc_initializer(1.0),
-                    activation_fn=activation))
-            prev_layer_size = size
-
-        # The last layer is adjusted to be of size num_outputs, but it's a
-        # layer with activation.
-        if no_final_linear and num_outputs:
-            layers.append(
-                SlimFC(
-                    in_size=prev_layer_size,
-                    out_size=num_outputs,
-                    initializer=normc_initializer(1.0),
-                    activation_fn=activation))
-            prev_layer_size = num_outputs
-        # Finish the layers with the provided sizes (`hiddens`), plus -
-        # iff num_outputs > 0 - a last linear layer of size num_outputs.
-        else:
-            if len(hiddens) > 0:
-                layers.append(
-                    SlimFC(
-                        in_size=prev_layer_size,
-                        out_size=hiddens[-1],
-                        initializer=normc_initializer(1.0),
-                        activation_fn=activation))
-                prev_layer_size = hiddens[-1]
-            if num_outputs:
-                self._logits = SlimFC(
-                    in_size=prev_layer_size,
-                    out_size=num_outputs,
-                    initializer=normc_initializer(0.01),
-                    activation_fn=None)
-            else:
-                self.num_outputs = (
-                    [int(np.product(obs_space.shape))] + hiddens[-1:])[-1]
-
-        # Layer to add the log std vars to the state-dependent means.
-        if self.free_log_std and self._logits:
-            self._append_free_log_std = AppendBiasLayer(num_outputs)
-
-        self._hidden_layers = nn.Sequential(*layers)
-
-        self._value_branch_separate = None
-        if not self.vf_share_layers:
-            # Build a parallel set of hidden layers for the value net.
-            prev_vf_layer_size = int(np.product(obs_space.shape))
-            vf_layers = []
-            for size in hiddens:
-                vf_layers.append(
-                    SlimFC(
-                        in_size=prev_vf_layer_size,
-                        out_size=size,
-                        activation_fn=activation,
-                        initializer=normc_initializer(1.0)))
-                prev_vf_layer_size = size
-            self._value_branch_separate = nn.Sequential(*vf_layers)
-
-        self._value_branch = SlimFC(
-            in_size=prev_layer_size,
-            out_size=1,
-            initializer=normc_initializer(0.01),
-            activation_fn=None)
-        # Holds the current "base" output (before logits layer).
-        self._features = None
-        # Holds the last input, in case value branch is separate.
-        self._last_flat_in = None
-
-    @override(TorchModelV2)
-    def forward(self, input_dict: Dict[str, TensorType],
-                state: List[TensorType],
-                seq_lens: TensorType) -> (TensorType, List[TensorType]):
-        obs = input_dict["obs_flat"].float()
-        self._last_flat_in = obs.reshape(obs.shape[0], -1)
-        self._features = self._hidden_layers(self._last_flat_in)
-        logits = self._logits(self._features) if self._logits else \
-            self._features
-        if self.free_log_std:
-            logits = self._append_free_log_std(logits)
-        return logits, state
-
-    @override(TorchModelV2)
-    def value_function(self) -> TensorType:
-        assert self._features is not None, "must call forward() first"
-        if self._value_branch_separate:
-            return self._value_branch(
-                self._value_branch_separate(self._last_flat_in)).squeeze(1)
-        else:
-            return self._value_branch(self._features).squeeze(1)
