@@ -254,8 +254,8 @@ def ppo_surrogate_loss(
     """
     # print(f"SAMPLE BATCH INFOS: {train_batch[SampleBatch.INFOS]}")
     
-    print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
-    print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
+    # print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
+    # print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
 
 
     logits, state = model(train_batch)
@@ -366,7 +366,6 @@ def ppo_surrogate_loss(
             }
         )
 
-
     # WM related stuff
     obs_act_all_agents = np.concatenate((
         train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
@@ -376,22 +375,29 @@ def ppo_surrogate_loss(
     inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
     pred_next_obs_all = []
     for i in range(n_agents):
-        pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])  # will crash
-        print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
+        pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
+        # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
         pred_next_obs_all.append(pred_next_obs_i)
         # states_all.append(state_i)
     
     assert n_agents == len(pred_next_obs_all)
 
+    dyn_model_stats = []
     dyn_models_loss = []
     for i, pred_next_obs in enumerate(pred_next_obs_all):
+        agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
         agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
+        agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
+        agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
+        # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
+        dyn_model_stats.append(agent_i_dyn_loss_unreduced)
         policy.dyn_models[i].zero_grad()
         agent_i_dyn_loss.backward()
         policy.dyn_model_optims[i].step()
-        print(f"AMMAJAAN: {agent_i_dyn_loss}")
+        # print(f"AMMAJAAN: {agent_i_dyn_loss}")
         dyn_models_loss.append(agent_i_dyn_loss)
-
+        
+    # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
     aggregation = torch.mean
     total_loss = aggregation(torch.stack([ld["total_loss"] for ld in loss_data]))
 
@@ -413,7 +419,14 @@ def ppo_surrogate_loss(
     )
     model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
 
-    print(f'dyn_models_loss: {dyn_models_loss}')
+    # infos = train_batch[SampleBatch.INFOS]
+    # if not torch.is_tensor(infos):
+    #     for idx, dyn_model_stat in enumerate(dyn_model_stats):
+    #         infos = [{**d1, **d2} for d1, d2 in zip(infos, dyn_model_stat)]
+
+        # print(f'samplebatch infos: {infos}')
+        # train_batch[SampleBatch.INFOS] = infos
+    # print(f'dyn_models_loss: {dyn_models_loss}')
 
     # return aggregation(torch.stack([total_loss] + dyn_models_loss))
     return total_loss
@@ -502,6 +515,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
     def postprocess_trajectory(
         self, sample_batch, other_agent_batches=None, episode=None
     ):
+        # WM stats here
+        dyn_losses_t = self.model.tower_stats.get('dyn_models_loss', None)
+        if torch.is_tensor(dyn_losses_t):
+            dyn_losses = dyn_losses_t.tolist()
+            for idx, dyn_loss in enumerate(dyn_losses):
+                episode.custom_metrics[f'agent {idx}/dyn_model_loss'] = dyn_loss
+
         pos = sample_batch.columns([SampleBatch.OBS])[0][:].reshape((len(sample_batch), len(self.action_space), -1))[:, :, :2]
         next_pos = sample_batch.columns([SampleBatch.NEXT_OBS])[0][:].reshape((len(sample_batch), len(self.action_space), -1))[:, :, :2]
         dist_t = np.sqrt(((pos[:, :, None] - pos[:, None]) ** 2).sum(axis=3))
