@@ -519,18 +519,29 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         dyn_losses_t = self.model.tower_stats.get('dyn_models_loss', None)
         if torch.is_tensor(dyn_losses_t):
             dyn_losses = dyn_losses_t.tolist()
-            for idx, dyn_loss in enumerate(dyn_losses):
-                episode.custom_metrics[f'agent {idx}/dyn_model_loss'] = dyn_loss
+            for cur_agent_idx, dyn_loss in enumerate(dyn_losses):
+                episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
 
-        pos = sample_batch.columns([SampleBatch.OBS])[0][:].reshape((len(sample_batch), len(self.action_space), -1))[:, :, :2]
-        next_pos = sample_batch.columns([SampleBatch.NEXT_OBS])[0][:].reshape((len(sample_batch), len(self.action_space), -1))[:, :, :2]
+        n_agents = len(self.action_space)
+
+        # Find common neighbors
+        cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((len(sample_batch), n_agents, -1))
+        next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((len(sample_batch), n_agents, -1))
+        act_batch = sample_batch[SampleBatch.ACTIONS].reshape(len(sample_batch), n_agents, -1)
+        cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
+
+        pos = cur_obs_batch[:, :, :2]
+        next_pos = next_obs_batch[:, :, :2]
+
         dist_t = np.sqrt(((pos[:, :, None] - pos[:, None]) ** 2).sum(axis=3))
         dist_t1 = np.sqrt(((next_pos[:, :, None] - next_pos[:, None]) ** 2).sum(axis=3))
 
         dist_t_edges = [np.argwhere(inner_arr < 0.55) for inner_arr in dist_t]
         dist_t1_edges = [np.argwhere(inner_arr < 0.55) for inner_arr in dist_t1]
+
         neighbors_t_batch = []
         neighbors_t1_batch = []
+        
         for sample_t, sample_t1 in zip(dist_t_edges, dist_t1_edges):
             _, counts_t = np.unique(sample_t[:, 0], return_counts=True)
             _, counts_t1 = np.unique(sample_t1[:, 0], return_counts=True)
@@ -540,6 +551,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             neighbors_t1 = [list(inner_arr) for inner_arr in neighbors_t1]
             neighbors_t_batch.append(neighbors_t)
             neighbors_t1_batch.append(neighbors_t1)
+        
         common_neighbors_batch = []
         for neighbors_t, neighbors_t1 in zip(neighbors_t_batch, neighbors_t1_batch):
             common_neighbors = []
@@ -556,9 +568,53 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         # Not using this here will introduce a memory leak
         # in torch (issue #6962).
         # TODO: no_grad still necessary?
+        
+        # for each batch
+        #   for each agent, 
+        #       for each common (t, t+1) neighbor of that agent, 
+        #           calculate intrinsic reward based on neighbor expectations and add it to extrinsic reward.
+        print(f"Common neighbors: {len(common_neighbors_batch)}")
+        print(f"Common neighbors: {common_neighbors_batch[0]}")
+        intr_rew_batch = []
+        for batch_idx, batch_data in enumerate(common_neighbors_batch):
+            intr_rew_agent = []
+            for cur_agent_idx, neighbors in enumerate(batch_data):
+                l2_loss = 0
+                for neighbor in neighbors:
+                    if cur_agent_idx != neighbor:
+                        # TODO: Find a way to send data in batches
+                        # print(f"input to dyn model: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20)}")
+                        # print(f"shape: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20).shape}")
+                        neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20))
+                        # print(f"next obs pred shape: {neighbor_pred.shape}")
+                        true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
+                        # print(f'true obs shape: {true_next_obs.shape}')
+                        l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)
+                        # print(f"l2 loss shape {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs).shape}")
+                intr_rew_agent.append(-l2_loss / len(neighbors))
+            intr_rew_batch.append(intr_rew_agent)
+        
+        intr_rew_t = torch.FloatTensor(intr_rew_batch)
+        # print(f'intrinsic reward: {intr_rew_t}')
+        print(f'intrinsic reward shape: {intr_rew_t.shape}')
+
+        if episode is not None:
+            for cur_agent_idx in range(n_agents):
+                agent_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
+                print(f'agent {cur_agent_idx} mean: {agent_mean}')
+                episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_mean.item()
+
+        rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
+        # print(f'rewards: {rewards}')
+        print(f'rewards shape: {rewards.shape}')
+        intr_rew_mean = intr_rew_t.mean(dim=1, keepdim=True)
+        print(f"Intrinsic rew mean shape: {intr_rew_mean.shape}")
+        rewards += (intr_rew_mean * (1 / cur_obs_batch.shape[2]))
+        sample_batch[SampleBatch.REWARDS] = np.squeeze(rewards.detach().cpu().numpy(), axis=1)
+
         with torch.no_grad():
             return compute_gae_for_sample_batch(
-                self, sample_batch, other_agent_batches, episode
+            self, sample_batch, other_agent_batches, episode
             )
 
     @override(PPOTorchPolicy)
