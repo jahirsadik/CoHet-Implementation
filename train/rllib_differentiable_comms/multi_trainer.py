@@ -156,15 +156,12 @@ def compute_gae_for_sample_batch(
                 )
             ]
         )
-
     else:
         #  For regular calls, we extract the rewards from the info
         #  dict into the samplebatch_infos_rewards dict, which now holds the rewards
         #  for all agents as dict.
-
         # sample_batch[SampleBatch.INFOS] = list of len ROLLOUT_SIZE of which every element is
         # {'rewards': {0: -0.077463925, 1: -0.0029145998, 2: -0.08233316}} if there are 3 agents
-
         samplebatch_infos_rewards = concat_samples(
             [
                 SampleBatch({str(k): [np.float32(v)] for k, v in s["rewards"].items()})
@@ -232,6 +229,7 @@ def compute_gae_for_sample_batch(
 
         for k in keys_to_overwirte:
             sample_batch[k][:, agent_index] = sample_batch_agent[k]
+
 
     return sample_batch
 
@@ -479,9 +477,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
-        obs_dim = observation_space.shape[0] // len(action_space)
-        act_dim = action_space[0].shape[0]
-        self.dyn_models = [WorldModel(len(action_space), 2, (obs_dim + act_dim), obs_dim, 128, device=config["env_config"]["device"]).to(config["env_config"]["device"])
+        obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
+        act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
+        self.dyn_models = [WorldModel(num_agent = len(action_space), 
+                                      layer_num= config.get("dyn_model_layer_num", 2), 
+                                      input_dim = (obs_dim + act_dim), 
+                                      output_dim = obs_dim, 
+                                      hidden_units = config.get("dyn_model_hidden_units", 128), 
+                                      device=config["env_config"]["device"]).to(config["env_config"]["device"])
                         for _ in range(len(action_space))]
         # adam optimiser to dynamics model as well
         # use the actor learning rate
@@ -591,10 +594,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                         # print(f'true obs shape: {true_next_obs.shape}')
                         l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)
                         # print(f"l2 loss shape {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs).shape}")
+                # log this l2 loss
                 intr_rew_agent.append(-l2_loss / len(neighbors))
             intr_rew_batch.append(intr_rew_agent)
         
         intr_rew_t = torch.FloatTensor(intr_rew_batch)
+        beta =  self.config.get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
+        intr_rew_t *= beta 
         # print(f'intrinsic reward: {intr_rew_t}')
         print(f'intrinsic reward shape: {intr_rew_t.shape}')
 
@@ -604,18 +610,27 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 print(f'agent {cur_agent_idx} mean: {agent_mean}')
                 episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_mean.item()
 
-        rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
+        # rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
         # print(f'rewards: {rewards}')
-        print(f'rewards shape: {rewards.shape}')
-        intr_rew_mean = intr_rew_t.mean(dim=1, keepdim=True)
-        print(f"Intrinsic rew mean shape: {intr_rew_mean.shape}")
-        rewards += (intr_rew_mean * (1 / cur_obs_batch.shape[2]))
-        sample_batch[SampleBatch.REWARDS] = np.squeeze(rewards.detach().cpu().numpy(), axis=1)
+        # print(f'rewards shape: {rewards.shape}')
+        # intr_rew_mean = intr_rew_t.mean(dim=1, keepdim=True)
+        # print(f"Intrinsic rew mean shape: {intr_rew_mean.shape}")
+        # rewards += (intr_rew_mean * (1 / cur_obs_batch.shape[2]))
+        # sample_batch[SampleBatch.REWARDS] = np.squeeze(rewards.detach().cpu().numpy(), axis=1)
+        # print(f"Samplebatch infos: {sample_batch[SampleBatch.INFOS]}")
+        # print(f"Samplebatch rewards: {sample_batch[SampleBatch.REWARDS]}")
+
+        # print(f'other agent batch polyamory: {other_agent_batches}')
 
         with torch.no_grad():
-            return compute_gae_for_sample_batch(
-            self, sample_batch, other_agent_batches, episode
-            )
+            sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
+
+
+        # enter rewards for each agent
+        print(f'sample batch rew before adding int rew: {sample_batch[SampleBatch.REWARDS][0]}')
+        sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
+        print(f'sample batch rew before adding int rew: {sample_batch[SampleBatch.REWARDS][0]}')
+        return sample_batch
 
     @override(PPOTorchPolicy)
     def extra_grad_process(self, local_optimizer, loss):
@@ -672,7 +687,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
         train_batch = train_batch.as_multi_agent()
         self._counters[NUM_AGENT_STEPS_SAMPLED] += train_batch.agent_steps()
         self._counters[NUM_ENV_STEPS_SAMPLED] += train_batch.env_steps()
-
+        print(f"train batch policy batches: {train_batch.policy_batches}")
         # Standardize advantage
         train_batch = standardize_fields(train_batch, ["advantages"])
         # Train
@@ -714,6 +729,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
                 )
             # Warn about bad clipping configs.
             train_batch.policy_batches[policy_id].set_get_interceptor(None)
+            print(f"Policy id: {policy_id}")
             mean_reward = train_batch.policy_batches[policy_id]["rewards"].mean()
             if mean_reward > self.config["vf_clip_param"]:
                 self.warned_vf_clip = True

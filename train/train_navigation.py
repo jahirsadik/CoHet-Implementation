@@ -33,6 +33,9 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    int_rew_beta,
     use_mlp,
     aggr,
     topology_type,
@@ -127,6 +130,9 @@ def train(
                     "vel_dim": 2,
                     "trainer": trainer_name,
                     "share_action_value": True,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "int_rew_beta": int_rew_beta,
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -188,7 +194,7 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=True,
-            heterogeneous=True,
+            heterogeneous=False,
             # Other model
             centralised_critic=False,
             use_mlp=False,
@@ -196,6 +202,10 @@ if __name__ == "__main__":
             aggr="add",
             topology_type=None,
             comm_range=0.55,
+            # Intrinsic reward related
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            int_rew_beta=None,
             # Env
             max_episode_steps=200,
             continuous_actions=True,
