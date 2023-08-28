@@ -39,7 +39,7 @@ def train(
     use_mlp,
     aggr,
     topology_type,
-    comm_range,
+    comm_radius,
     add_agent_index,
     continuous_actions,
     seed,
@@ -121,7 +121,7 @@ def train(
                     "use_beta": False,
                     "aggr": aggr,
                     "topology_type": None,
-                    "comm_radius": comm_range,
+                    "comm_radius": comm_radius,
                     "use_mlp": use_mlp,
                     "add_agent_index": add_agent_index,
                     "pos_start": 0,
@@ -152,13 +152,13 @@ def train(
                 "max_steps": max_episode_steps,
                 # Env specific
                 "scenario_config": {
-                    "n_agents": 5,
+                    "n_agents": 3,
                     "lidar_range": 0.35,
                     "agent_radius": 0.1,
                     "shared_rew": False,
                     "pos_shaping_factor": 1,
                     "final_reward": 0.005,
-                    "comm_range": comm_range,
+                    "comm_range": comm_radius,
                     "agent_collision_penalty": -1,
                 },
             },
@@ -194,19 +194,20 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=True,
-            heterogeneous=False,
+            heterogeneous=True,
             # Other model
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_range=0.55,
+            comm_radius=0.55,
             # Intrinsic reward related
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=None,
+            int_rew_beta=1,
             # Env
             max_episode_steps=200,
             continuous_actions=True,
         )
+

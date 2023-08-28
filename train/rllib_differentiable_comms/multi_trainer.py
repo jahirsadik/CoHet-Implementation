@@ -480,12 +480,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
         act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
         self.dyn_models = [WorldModel(num_agent = len(action_space), 
-                                      layer_num= config.get("dyn_model_layer_num", 2), 
+                                      layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
                                       input_dim = (obs_dim + act_dim), 
                                       output_dim = obs_dim, 
-                                      hidden_units = config.get("dyn_model_hidden_units", 128), 
+                                      hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
                                       device=config["env_config"]["device"]).to(config["env_config"]["device"])
                         for _ in range(len(action_space))]
+        print(f"dyn_model_hidden_layer: {config['model']['custom_model_config'].get('dyn_model_hidden_units', 128)}")
         # adam optimiser to dynamics model as well
         # use the actor learning rate
         self.dyn_model_optims = [Adam(dyn_model.parameters()) for dyn_model in self.dyn_models]
@@ -539,8 +540,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         dist_t = np.sqrt(((pos[:, :, None] - pos[:, None]) ** 2).sum(axis=3))
         dist_t1 = np.sqrt(((next_pos[:, :, None] - next_pos[:, None]) ** 2).sum(axis=3))
 
-        dist_t_edges = [np.argwhere(inner_arr < 0.55) for inner_arr in dist_t]
-        dist_t1_edges = [np.argwhere(inner_arr < 0.55) for inner_arr in dist_t1]
+        dist_t_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t]
+        dist_t1_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t1]
 
         neighbors_t_batch = []
         neighbors_t1_batch = []
@@ -576,8 +577,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         #   for each agent, 
         #       for each common (t, t+1) neighbor of that agent, 
         #           calculate intrinsic reward based on neighbor expectations and add it to extrinsic reward.
-        print(f"Common neighbors: {len(common_neighbors_batch)}")
-        print(f"Common neighbors: {common_neighbors_batch[0]}")
+        # print(f"Common neighbors: {len(common_neighbors_batch)}")
+        # print(f"Common neighbors: {common_neighbors_batch[0]}")
         intr_rew_batch = []
         for batch_idx, batch_data in enumerate(common_neighbors_batch):
             intr_rew_agent = []
@@ -597,19 +598,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 # log this l2 loss
                 intr_rew_agent.append(-l2_loss / len(neighbors))
             intr_rew_batch.append(intr_rew_agent)
-        
-        intr_rew_t = torch.FloatTensor(intr_rew_batch)
-        beta =  self.config.get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
-        intr_rew_t *= beta 
-        # print(f'intrinsic reward: {intr_rew_t}')
-        print(f'intrinsic reward shape: {intr_rew_t.shape}')
-
-        if episode is not None:
-            for cur_agent_idx in range(n_agents):
-                agent_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
-                print(f'agent {cur_agent_idx} mean: {agent_mean}')
-                episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_mean.item()
-
+               
         # rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
         # print(f'rewards: {rewards}')
         # print(f'rewards shape: {rewards.shape}')
@@ -626,11 +615,33 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
 
 
+        intr_rew_t = torch.FloatTensor(intr_rew_batch)
+        beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
+        c_r =  self.config["model"]["custom_model_config"].get("comm_radius",17)
+        print(f"comm range: {c_r}")
+        print(f"Beta value: {beta}")
+        print(f"1/cur_obs_batch.shape[2]: {1 / cur_obs_batch.shape[2]}")
+        intr_rew_t *= beta
+        print(f'intrinsic reward shape: {intr_rew_t.shape}')
+
+        # reward logging
+        if episode is not None:
+            for cur_agent_idx in range(n_agents):
+                agent_intr_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
+                print(f"sample_batch[SampleBatch.REWARDS] type: {type(sample_batch[SampleBatch.REWARDS])}")
+                agent_extr_mean = torch.mean(to_torch(sample_batch[SampleBatch.REWARDS][:, cur_agent_idx]))
+                print(f'agent {cur_agent_idx} intrinsic mean: {agent_intr_mean}')
+                print(f'agent {cur_agent_idx} extrinsic mean: {agent_extr_mean}')
+                episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
+                episode.custom_metrics[f'agent {cur_agent_idx}/extr_rew'] = agent_extr_mean.item()
+
         # enter rewards for each agent
-        print(f'sample batch rew before adding int rew: {sample_batch[SampleBatch.REWARDS][0]}')
+        print(f'sample batch rew before adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
+        print(f'int rew: \n{intr_rew_t[0]}')
         sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
-        print(f'sample batch rew before adding int rew: {sample_batch[SampleBatch.REWARDS][0]}')
+        print(f'sample batch rew after adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
         return sample_batch
+
 
     @override(PPOTorchPolicy)
     def extra_grad_process(self, local_optimizer, loss):
