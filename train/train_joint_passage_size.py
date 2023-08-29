@@ -67,15 +67,20 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    int_rew_beta,
     use_mlp,
     aggr,
     topology_type,
+    comm_radius,
     add_agent_index,
     continuous_actions,
     seed,
     notes,
     share_action_value,
     curriculum,
+
 ):
     checkpoint_rel_path = "ray_results/joint/GIPPO/MultiPPOTrainer_joint_9b1c9_00000_0_2022-09-01_10-08-12/checkpoint_000099/checkpoint-99"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
@@ -105,12 +110,12 @@ def train(
         trainer,
         name=group_name if model_name == "GPPO" else model_name,
         callbacks=[
-            # WandbLoggerCallback(
-            #     project=f"{scenario_name}{'_test' if ON_MAC else ''}",
-            #     api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
-            #     group=group_name,
-            #     notes=notes,
-            # )
+            WandbLoggerCallback(
+                project=f"{scenario_name}{'_test' if ON_MAC else ''}",
+                api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
+                group=group_name,
+                notes=notes,
+            )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
         stop={"training_iteration": 1200},
@@ -161,6 +166,10 @@ def train(
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
                     "curriculum": curriculum,
+                    "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "int_rew_beta": int_rew_beta,
                 },
             },
             "env_config": {
@@ -234,7 +243,12 @@ if __name__ == "__main__":
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
-            topology_type="full",
+            topology_type=None,
+            comm_radius=float('inf'),
+            # Intrinsic reward related
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            int_rew_beta=1,
             # Env
             max_episode_steps=300,
             continuous_actions=True,

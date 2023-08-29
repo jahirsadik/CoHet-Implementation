@@ -589,7 +589,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                         # TODO: Find a way to send data in batches
                         # print(f"input to dyn model: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20)}")
                         # print(f"shape: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20).shape}")
-                        neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20))
+                        neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
                         # print(f"next obs pred shape: {neighbor_pred.shape}")
                         true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
                         # print(f'true obs shape: {true_next_obs.shape}')
