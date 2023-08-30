@@ -251,15 +251,11 @@ def ppo_surrogate_loss(
             of loss tensors.
     """
     # print(f"SAMPLE BATCH INFOS: {train_batch[SampleBatch.INFOS]}")
-    
     # print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
     # print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
-
-
     logits, state = model(train_batch)
     # logits has shape (BATCH, num_agents * num_outputs_per_agent)
     curr_action_dist = dist_class(logits, model)
-
     # RNN case: Mask away 0-padded chunks at end of time axis.
     if state:
         B = len(train_batch[SampleBatch.SEQ_LENS])
@@ -364,41 +360,41 @@ def ppo_surrogate_loss(
             }
         )
 
-    # WM related stuff
-    obs_act_all_agents = np.concatenate((
-        train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
-        train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
-        axis=2)
-    
-    inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-    pred_next_obs_all = []
-    for i in range(n_agents):
-        pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
-        # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
-        pred_next_obs_all.append(pred_next_obs_i)
-        # states_all.append(state_i)
-    
-    assert n_agents == len(pred_next_obs_all)
+    if policy.alignment_type is not None:
+        # WM related stuff
+        obs_act_all_agents = np.concatenate((
+            train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
+            train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
+            axis=2)
+        inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+        pred_next_obs_all = []
+        for i in range(n_agents):
+            pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
+            # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
+            pred_next_obs_all.append(pred_next_obs_i)
+            # states_all.append(state_i)
 
-    dyn_model_stats = []
-    dyn_models_loss = []
-    for i, pred_next_obs in enumerate(pred_next_obs_all):
-        agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
-        agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
-        agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
-        agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
-        # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
-        dyn_model_stats.append(agent_i_dyn_loss_unreduced)
-        policy.dyn_models[i].zero_grad()
-        agent_i_dyn_loss.backward()
-        policy.dyn_model_optims[i].step()
-        # print(f"AMMAJAAN: {agent_i_dyn_loss}")
-        dyn_models_loss.append(agent_i_dyn_loss)
+        assert n_agents == len(pred_next_obs_all)
+        dyn_model_stats = []
+        dyn_models_loss = []
+        for i, pred_next_obs in enumerate(pred_next_obs_all):
+            agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
+            agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
+            agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
+            agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
+            # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
+            dyn_model_stats.append(agent_i_dyn_loss_unreduced)
+            policy.dyn_models[i].zero_grad()
+            agent_i_dyn_loss.backward()
+            policy.dyn_model_optims[i].step()
+            # print(f"AMMAJAAN: {agent_i_dyn_loss}")
+            dyn_models_loss.append(agent_i_dyn_loss)
         
-    # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
+        model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
+        # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
+
     aggregation = torch.mean
     total_loss = aggregation(torch.stack([ld["total_loss"] for ld in loss_data]))
-
     model.tower_stats["total_loss"] = total_loss
     model.tower_stats["mean_policy_loss"] = aggregation(
         torch.stack([ld["mean_policy_loss"] for ld in loss_data])
@@ -415,8 +411,6 @@ def ppo_surrogate_loss(
     model.tower_stats["mean_kl_loss"] = aggregation(
         torch.stack([ld["mean_kl"] for ld in loss_data])
     )
-    model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
-
     # infos = train_batch[SampleBatch.INFOS]
     # if not torch.is_tensor(infos):
     #     for idx, dyn_model_stat in enumerate(dyn_model_stats):
@@ -425,7 +419,6 @@ def ppo_surrogate_loss(
         # print(f'samplebatch infos: {infos}')
         # train_batch[SampleBatch.INFOS] = infos
     # print(f'dyn_models_loss: {dyn_models_loss}')
-
     # return aggregation(torch.stack([total_loss] + dyn_models_loss))
     return total_loss
 
@@ -477,19 +470,21 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
-        obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
-        act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
-        self.dyn_models = [WorldModel(num_agent = len(action_space), 
-                                      layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
-                                      input_dim = (obs_dim + act_dim), 
-                                      output_dim = obs_dim, 
-                                      hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
-                                      device=config["env_config"]["device"]).to(config["env_config"]["device"])
-                        for _ in range(len(action_space))]
-        print(f"dyn_model_hidden_layer: {config['model']['custom_model_config'].get('dyn_model_hidden_units', 128)}")
-        # adam optimiser to dynamics model as well
-        # use the actor learning rate
-        self.dyn_model_optims = [Adam(dyn_model.parameters()) for dyn_model in self.dyn_models]
+        self.alignment_type = config["model"]["custom_model_config"].get("alignment_type", None)
+        if self.alignment_type is not None:
+            obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
+            act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
+            self.dyn_models = [WorldModel(num_agent = len(action_space), 
+                                            layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
+                                            input_dim = (obs_dim + act_dim), 
+                                            output_dim = obs_dim, 
+                                            hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
+                                            device=config["env_config"]["device"]).to(config["env_config"]["device"])
+                            for _ in range(len(action_space))]
+            print(f"dyn_model_hidden_layer: {config['model']['custom_model_config'].get('dyn_model_hidden_units', 128)}")
+            # adam optimiser to dynamics model as well
+            # use the actor learning rate
+            self.dyn_model_optims = [Adam(dyn_model.parameters()) for dyn_model in self.dyn_models]
 
         validate_config(config)
         TorchPolicyV2.__init__(
@@ -526,79 +521,72 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             for cur_agent_idx, dyn_loss in enumerate(dyn_losses):
                 episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
 
-        n_agents = len(self.action_space)
-
-        # Find common neighbors
+        n_agents = len(self.action_space)   # total no of agents
+        intr_rew_t = torch.empty((len(sample_batch), n_agents)) # Initialize empty torch first, to be changed later
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((len(sample_batch), n_agents, -1))
         next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((len(sample_batch), n_agents, -1))
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape(len(sample_batch), n_agents, -1)
         cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
-
-        pos = cur_obs_batch[:, :, :2]
-        next_pos = next_obs_batch[:, :, :2]
-
-        dist_t = np.sqrt(((pos[:, :, None] - pos[:, None]) ** 2).sum(axis=3))
-        dist_t1 = np.sqrt(((next_pos[:, :, None] - next_pos[:, None]) ** 2).sum(axis=3))
-
-        dist_t_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t]
-        dist_t1_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t1]
-
-        neighbors_t_batch = []
-        neighbors_t1_batch = []
         
-        for sample_t, sample_t1 in zip(dist_t_edges, dist_t1_edges):
-            _, counts_t = np.unique(sample_t[:, 0], return_counts=True)
-            _, counts_t1 = np.unique(sample_t1[:, 0], return_counts=True)
-            neighbors_t = np.split(sample_t[:, 1], np.cumsum(counts_t)[:-1])
-            neighbors_t1 = np.split(sample_t1[:, 1], np.cumsum(counts_t1)[:-1])
-            neighbors_t = [list(inner_arr) for inner_arr in neighbors_t]
-            neighbors_t1 = [list(inner_arr) for inner_arr in neighbors_t1]
-            neighbors_t_batch.append(neighbors_t)
-            neighbors_t1_batch.append(neighbors_t1)
+        if self.alignment_type == "team":
+            intr_rew_batch = []
+            pos_batch = cur_obs_batch[:, :, :2]
+            next_pos_batch = next_obs_batch[:, :, :2]
+            dist_t = np.sqrt(((pos_batch[:, :, None] - pos_batch[:, None]) ** 2).sum(axis=3))
+            dist_t1 = np.sqrt(((next_pos_batch[:, :, None] - next_pos_batch[:, None]) ** 2).sum(axis=3))
+            dist_t_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t]
+            dist_t1_edges = [np.argwhere(inner_arr < self.config["model"]["custom_model_config"].get("comm_radius", float('inf'))) for inner_arr in dist_t1]
+            neighbors_t_batch = []
+            neighbors_t1_batch = []
+            # calculate which neighbors are in the neighborhood at time t and t+1
+            for sample_t, sample_t1 in zip(dist_t_edges, dist_t1_edges):
+                _, counts_t = np.unique(sample_t[:, 0], return_counts=True)
+                _, counts_t1 = np.unique(sample_t1[:, 0], return_counts=True)
+                neighbors_t = np.split(sample_t[:, 1], np.cumsum(counts_t)[:-1])
+                neighbors_t1 = np.split(sample_t1[:, 1], np.cumsum(counts_t1)[:-1])
+                neighbors_t = [list(inner_arr) for inner_arr in neighbors_t]
+                neighbors_t1 = [list(inner_arr) for inner_arr in neighbors_t1]
+                neighbors_t_batch.append(neighbors_t)
+                neighbors_t1_batch.append(neighbors_t1)
+            # calculate common neighbors between time t and t+1
+            common_neighbors_batch = []
+            for neighbors_t, neighbors_t1 in zip(neighbors_t_batch, neighbors_t1_batch):
+                common_neighbors = []
+                for agent_t, agent_t1 in zip(neighbors_t, neighbors_t1):
+                    common_neighbors.append(list(set(agent_t) & set(agent_t1)))
+                common_neighbors_batch.append(common_neighbors)
+
+            for batch_idx, batch_data in enumerate(common_neighbors_batch):
+                intr_rew_agent = []
+                for cur_agent_idx, neighbors in enumerate(batch_data):
+                    l2_loss = 0
+                    for neighbor in neighbors:
+                        if cur_agent_idx != neighbor:
+                            # TODO: Find a way to send data in batches
+                            # print(f"input to dyn model: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20)}")
+                            # print(f"shape: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20).shape}")
+                            neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
+                            # print(f"next obs pred shape: {neighbor_pred.shape}")
+                            true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
+                            # print(f'true obs shape: {true_next_obs.shape}')
+                            l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)
+                            # print(f"l2 loss shape {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs).shape}")
+                    # log this l2 loss
+                    intr_rew_agent.append(-l2_loss / len(neighbors))
+                intr_rew_batch.append(intr_rew_agent)
+            intr_rew_t = torch.FloatTensor(intr_rew_batch)
         
-        common_neighbors_batch = []
-        for neighbors_t, neighbors_t1 in zip(neighbors_t_batch, neighbors_t1_batch):
-            common_neighbors = []
-            for agent_t, agent_t1 in zip(neighbors_t, neighbors_t1):
-                common_neighbors.append(list(set(agent_t) & set(agent_t1)))
-            common_neighbors_batch.append(common_neighbors)
-        # for i, j, k in zip(neighbors_t_batch, neighbors_t1_batch, common_neighbors_batch):
-        #     if i != j:
-        #         print(f"Batch_neighbors_t: {i}")
-        #         print(f"Batch_neighbors_t1: {j}")
-        #         print(f"Common_neighbors: {k}")
-        # print(f'other agents shape: {other_agent_batches.shape}')
-        # Do all post-processing always with no_grad().
-        # Not using this here will introduce a memory leak
-        # in torch (issue #6962).
-        # TODO: no_grad still necessary?
-        
-        # for each batch
-        #   for each agent, 
-        #       for each common (t, t+1) neighbor of that agent, 
-        #           calculate intrinsic reward based on neighbor expectations and add it to extrinsic reward.
-        # print(f"Common neighbors: {len(common_neighbors_batch)}")
-        # print(f"Common neighbors: {common_neighbors_batch[0]}")
-        intr_rew_batch = []
-        for batch_idx, batch_data in enumerate(common_neighbors_batch):
-            intr_rew_agent = []
-            for cur_agent_idx, neighbors in enumerate(batch_data):
-                l2_loss = 0
-                for neighbor in neighbors:
-                    if cur_agent_idx != neighbor:
-                        # TODO: Find a way to send data in batches
-                        # print(f"input to dyn model: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20)}")
-                        # print(f"shape: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20).shape}")
-                        neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
-                        # print(f"next obs pred shape: {neighbor_pred.shape}")
-                        true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
-                        # print(f'true obs shape: {true_next_obs.shape}')
-                        l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)
-                        # print(f"l2 loss shape {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs).shape}")
-                # log this l2 loss
-                intr_rew_agent.append(-l2_loss / len(neighbors))
-            intr_rew_batch.append(intr_rew_agent)
-               
+        elif self.alignment_type == "self":
+            # intr_rew_agent = []
+            intr_rew_t = torch.zeros((len(sample_batch), n_agents))
+            for cur_agent_idx in range(n_agents):
+                self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
+                true_next_obs = to_torch(next_obs_batch[:, cur_agent_idx, :])
+                l2_loss = torch.mean(torch.nn.functional.mse_loss(self_pred, true_next_obs, reduction='none'), dim=1)
+                print(f"l2 loss: {l2_loss}")
+                intr_rew_t[:, cur_agent_idx] = -l2_loss # not dividing by num of agents here
+            
+        # Find common neighbors
         # rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
         # print(f'rewards: {rewards}')
         # print(f'rewards shape: {rewards.shape}')
@@ -608,38 +596,36 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         # sample_batch[SampleBatch.REWARDS] = np.squeeze(rewards.detach().cpu().numpy(), axis=1)
         # print(f"Samplebatch infos: {sample_batch[SampleBatch.INFOS]}")
         # print(f"Samplebatch rewards: {sample_batch[SampleBatch.REWARDS]}")
-
         # print(f'other agent batch polyamory: {other_agent_batches}')
 
         with torch.no_grad():
             sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
-
-
-        intr_rew_t = torch.FloatTensor(intr_rew_batch)
-        beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
-        c_r =  self.config["model"]["custom_model_config"].get("comm_radius",17)
-        print(f"comm range: {c_r}")
-        print(f"Beta value: {beta}")
-        print(f"1/cur_obs_batch.shape[2]: {1 / cur_obs_batch.shape[2]}")
-        intr_rew_t *= beta
-        print(f'intrinsic reward shape: {intr_rew_t.shape}')
+        
+        if self.alignment_type is not None:
+            beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
+            c_r =  self.config["model"]["custom_model_config"].get("comm_radius",17)
+            print(f"comm range: {c_r}")
+            print(f"Beta value: {beta}")
+            print(f"1/cur_obs_batch.shape[2]: {1 / cur_obs_batch.shape[2]}")
+            intr_rew_t *= beta
+            print(f'intrinsic reward shape: {intr_rew_t.shape}')
+            print(f'intrinsic reward final: {intr_rew_t[:20]}')
 
         # reward logging
         if episode is not None:
             for cur_agent_idx in range(n_agents):
-                agent_intr_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
-                print(f"sample_batch[SampleBatch.REWARDS] type: {type(sample_batch[SampleBatch.REWARDS])}")
+                if self.alignment_type is not None:
+                    agent_intr_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
+                    episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
                 agent_extr_mean = torch.mean(to_torch(sample_batch[SampleBatch.REWARDS][:, cur_agent_idx]))
-                print(f'agent {cur_agent_idx} intrinsic mean: {agent_intr_mean}')
-                print(f'agent {cur_agent_idx} extrinsic mean: {agent_extr_mean}')
-                episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
                 episode.custom_metrics[f'agent {cur_agent_idx}/extr_rew'] = agent_extr_mean.item()
 
         # enter rewards for each agent
-        print(f'sample batch rew before adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
         print(f'int rew: \n{intr_rew_t[0]}')
-        sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
-        print(f'sample batch rew after adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
+        if self.alignment_type is not None:
+            print(f'sample batch rew before adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
+            sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
+            print(f'sample batch rew after adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
         return sample_batch
 
 

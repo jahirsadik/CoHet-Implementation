@@ -39,6 +39,7 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    alignment_type,
     comm_radius,
     add_agent_index,
     continuous_actions,
@@ -133,6 +134,7 @@ def train(
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
                     "int_rew_beta": int_rew_beta,
+                    "alignment_type": alignment_type,
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -153,13 +155,13 @@ def train(
                 # Env specific
                 "scenario_config": {
                     "n_agents": 3,
-                    "lidar_range": 0.35,
+                    "lidar_range": comm_radius,
                     "agent_radius": 0.1,
                     "shared_rew": False,
                     "pos_shaping_factor": 1,
                     "final_reward": 0.005,
                     "comm_range": comm_radius,
-                    "agent_collision_penalty": -1,
+                    "agent_collision_penalty": -.5,
                 },
             },
             "evaluation_interval": 20,
@@ -201,11 +203,12 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=0.55,
+            comm_radius=0.45,
             # Intrinsic reward related
+            alignment_type = None,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=1,
+            int_rew_beta=.5,
             # Env
             max_episode_steps=200,
             continuous_actions=True,
