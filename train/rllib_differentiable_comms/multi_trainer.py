@@ -522,7 +522,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
 
         n_agents = len(self.action_space)   # total no of agents
-        intr_rew_t = torch.empty((len(sample_batch), n_agents)) # Initialize empty torch first, to be changed later
+        intr_rew_t = torch.zeros((len(sample_batch), n_agents)) # Initialize empty torch first, to be changed later
+        print(f"int_rew initially: {intr_rew_t[0]}")
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((len(sample_batch), n_agents, -1))
         next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((len(sample_batch), n_agents, -1))
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape(len(sample_batch), n_agents, -1)
