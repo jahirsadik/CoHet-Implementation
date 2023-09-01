@@ -70,6 +70,7 @@ def train(
     dyn_model_hidden_units,
     dyn_model_layer_num,
     int_rew_beta,
+    alignment_type,
     use_mlp,
     aggr,
     topology_type,
@@ -170,6 +171,7 @@ def train(
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
                     "int_rew_beta": int_rew_beta,
+                    "alignment_type": alignment_type,
                 },
             },
             "env_config": {
@@ -181,19 +183,19 @@ def train(
                 # Env specific
                 "scenario_config": {
                     "fixed_passage": False,
-                    "random_start_angle": False,
-                    "random_goal_angle": False,
+                    "random_start_angle": True,
+                    "random_goal_angle": True,
                     "pos_shaping_factor": 1,
                     "rot_shaping_factor": 1,
                     "collision_reward": 0,  # -0.1,
                     "energy_reward_coeff": 0,
-                    "observe_joint_angle": False,
+                    "observe_joint_angle": True,
                     "joint_angle_obs_noise": 0.0,
                     "asym_package": False,
                     "mass_ratio": 1,
                     "mass_position": 0.75,
                     "max_speed_1": None,  # 0.05
-                    "obs_noise": 0.0,
+                    "obs_noise": 0.3,
                     "n_passages": 4,
                     "middle_angle_180": True,
                 },
@@ -236,9 +238,9 @@ if __name__ == "__main__":
             curriculum=True,
             # Model important
             share_observations=True,
-            heterogeneous=True,
+            heterogeneous=False,
             # Other model
-            share_action_value=True,
+            share_action_value=False,
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
@@ -248,7 +250,8 @@ if __name__ == "__main__":
             # Intrinsic reward related
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=1,
+            int_rew_beta= .5,
+            alignment_type = None,
             # Env
             max_episode_steps=300,
             continuous_actions=True,

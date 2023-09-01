@@ -4,6 +4,7 @@
 
 import os
 import pickle
+
 from ray import tune
 from ray.air.callbacks.wandb import WandbLoggerCallback
 from ray.rllib.algorithms.callbacks import MultiCallbacks
@@ -20,7 +21,7 @@ rollout_fragment_length = (
     if ON_MAC
     else train_batch_size // (num_workers * num_envs_per_worker)
 )
-scenario_name = "football"
+scenario_name = "simple_adversary"
 model_name = "GPPO"
 
 
@@ -45,7 +46,7 @@ def train(
 ):
     checkpoint_rel_path = "ray_results/joint/HetGIPPO/MultiPPOTrainer_joint_654d9_00000_0_2022-08-23_17-26-52/checkpoint_001349/checkpoint-1349"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
-    params_path = checkpoint_path.parent.parent / "paraFms.pkl"
+    params_path = checkpoint_path.parent.parent / "params.pkl"
 
     fcnet_model_config = MODEL_DEFAULTS.copy()
     fcnet_model_config.update({"vf_share_layers": False})
@@ -82,7 +83,7 @@ def train(
             )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
-        stop={"training_iteration": 1200},
+        stop={"training_iteration": 5000},
         restore=str(checkpoint_path) if restore else None,
         config={
             "seed": seed,
@@ -144,10 +145,8 @@ def train(
                 "max_steps": max_episode_steps,
                 # Env specific
                 "scenario_config": {
-                    "dense_reward_ratio": 0.0001,
-                    "max_speed": .7,
-                    "ball_size": .07,
-                    "agent_size": 0.09,
+                    "n_agents":  3,
+                    "n_adversaries": 1,
                 },
             },
             "evaluation_interval": 20,
@@ -162,6 +161,8 @@ def train(
                 "callbacks": MultiCallbacks(
                     [
                         TrainingUtils.RenderingCallbacks,
+                        TrainingUtils.EvaluationCallbacks,
+                        TrainingUtils.HeterogeneityMeasureCallbacks,
                     ]
                 ),
             },
@@ -175,7 +176,7 @@ def train(
 if __name__ == "__main__":
     TrainingUtils.init_ray(scenario_name=scenario_name, local_mode=ON_MAC)
 
-    for seed in [6]:
+    for seed in [2]:
         train(
             seed=seed,
             restore=False,
@@ -189,7 +190,7 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=2.5,
+            comm_radius=0.9,
             # Intrinsic reward related
             alignment_type = None,
             dyn_model_hidden_units=128,
@@ -199,3 +200,4 @@ if __name__ == "__main__":
             max_episode_steps=200,
             continuous_actions=True,
         )
+
