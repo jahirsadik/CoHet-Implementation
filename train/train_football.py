@@ -82,7 +82,7 @@ def train(
             )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
-        stop={"training_iteration": 1200},
+        stop={"training_iteration": 1000},
         restore=str(checkpoint_path) if restore else None,
         config={
             "seed": seed,
@@ -144,10 +144,12 @@ def train(
                 "max_steps": max_episode_steps,
                 # Env specific
                 "scenario_config": {
-                    "dense_reward_ratio": 0.0001,
+                    "dense_reward_ratio": 1.0,
                     "max_speed": .7,
                     "ball_size": .07,
                     "agent_size": 0.09,
+                    "n_blue_agents": 6,
+                    "n_red_agents": 6,
                 },
             },
             "evaluation_interval": 20,
@@ -191,10 +193,10 @@ if __name__ == "__main__":
             topology_type=None,
             comm_radius=2.5,
             # Intrinsic reward related
-            alignment_type = None,
+            alignment_type = "team",
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=.5,
+            int_rew_beta=10,
             # Env
             max_episode_steps=200,
             continuous_actions=True,

@@ -578,8 +578,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             intr_rew_t = torch.FloatTensor(intr_rew_batch)
         
         elif self.alignment_type == "self":
-            # intr_rew_agent = []
-            intr_rew_t = torch.zeros((len(sample_batch), n_agents))
             for cur_agent_idx in range(n_agents):
                 self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
                 true_next_obs = to_torch(next_obs_batch[:, cur_agent_idx, :])
@@ -685,7 +683,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
         train_batch = train_batch.as_multi_agent()
         self._counters[NUM_AGENT_STEPS_SAMPLED] += train_batch.agent_steps()
         self._counters[NUM_ENV_STEPS_SAMPLED] += train_batch.env_steps()
-        print(f"train batch policy batches: {train_batch.policy_batches}")
+        
         # Standardize advantage
         train_batch = standardize_fields(train_batch, ["advantages"])
         # Train
@@ -727,7 +725,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
                 )
             # Warn about bad clipping configs.
             train_batch.policy_batches[policy_id].set_get_interceptor(None)
-            print(f"Policy id: {policy_id}")
+        
             mean_reward = train_batch.policy_batches[policy_id]["rewards"].mean()
             if mean_reward > self.config["vf_clip_param"]:
                 self.warned_vf_clip = True

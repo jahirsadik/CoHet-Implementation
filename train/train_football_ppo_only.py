@@ -9,10 +9,12 @@ from ray import tune
 from ray.air.callbacks.wandb import WandbLoggerCallback
 from ray.rllib.algorithms.callbacks import MultiCallbacks
 from ray.rllib.models import MODEL_DEFAULTS
+
 from rllib_differentiable_comms.multi_trainer import MultiPPOTrainer
 from utils import PathUtils, TrainingUtils
 
 ON_MAC = True
+
 train_batch_size = 60000 if not ON_MAC else 200  # Jan 32768
 num_workers = 5 if not ON_MAC else 0  # jan 4
 num_envs_per_worker = 60 if not ON_MAC else 1  # Jan 32
@@ -21,8 +23,8 @@ rollout_fragment_length = (
     if ON_MAC
     else train_batch_size // (num_workers * num_envs_per_worker)
 )
-scenario_name = "simple_adversary"
-model_name = "GPPO"
+scenario_name = "football"
+model_name = "MyFullyConnectedNetwork"
 
 
 def train(
@@ -48,9 +50,6 @@ def train(
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
     params_path = checkpoint_path.parent.parent / "params.pkl"
 
-    fcnet_model_config = MODEL_DEFAULTS.copy()
-    fcnet_model_config.update({"vf_share_layers": False})
-
     if centralised_critic and not use_mlp:
         if share_observations:
             group_name = "GAPPO"
@@ -64,6 +63,7 @@ def train(
         group_name = "IPPO"
 
     group_name = f"{'Het' if heterogeneous else ''}{group_name}"
+    print(f"Group name: {group_name}")
 
     if restore:
         with open(params_path, "rb") as f:
@@ -71,6 +71,29 @@ def train(
 
     trainer = MultiPPOTrainer
     trainer_name = "MultiPPOTrainer" if trainer is MultiPPOTrainer else "PPOTrainer"
+
+    fcnet_model_config = MODEL_DEFAULTS.copy()
+    fcnet_model_config.update({
+        "vf_share_layers": False,
+        "trainer": trainer_name,
+        "heterogeneous": heterogeneous,
+        "share_observations": share_observations,
+        "use_beta": False,
+        "add_agent_index": add_agent_index,
+        "pos_start": 0,
+        "pos_dim": 2,
+        "vel_start": 2,
+        "vel_dim": 2,
+        "model": {
+            "custom_model_config": {
+                "dyn_model_hidden_units": dyn_model_hidden_units,
+                "dyn_model_layer_num": dyn_model_layer_num,
+                "int_rew_beta": int_rew_beta,
+                "alignment_type": alignment_type,
+            },
+        },
+    })
+
     tune.run(
         trainer,
         name=group_name if model_name.startswith("GPPO") else model_name,
@@ -120,6 +143,7 @@ def train(
                     "use_beta": False,
                     "aggr": aggr,
                     "topology_type": None,
+                    "comm_radius": comm_radius,
                     "use_mlp": use_mlp,
                     "add_agent_index": add_agent_index,
                     "pos_start": 0,
@@ -128,11 +152,9 @@ def train(
                     "vel_dim": 2,
                     "trainer": trainer_name,
                     "share_action_value": True,
-                    "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
                     "int_rew_beta": int_rew_beta,
-                    "alignment_type": alignment_type,
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -145,8 +167,12 @@ def train(
                 "max_steps": max_episode_steps,
                 # Env specific
                 "scenario_config": {
-                    "n_agents":  3,
-                    "n_adversaries": 1,
+                    "dense_reward_ratio": 1.0,
+                    "max_speed": .7,
+                    "ball_size": .07,
+                    "agent_size": 0.09,
+                    "n_blue_agents": 6,
+                    "n_red_agents": 6,
                 },
             },
             "evaluation_interval": 20,
@@ -161,8 +187,6 @@ def train(
                 "callbacks": MultiCallbacks(
                     [
                         TrainingUtils.RenderingCallbacks,
-                        TrainingUtils.EvaluationCallbacks,
-                        TrainingUtils.HeterogeneityMeasureCallbacks,
                     ]
                 ),
             },
@@ -182,17 +206,17 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=True,
-            heterogeneous=True,
+            share_observations=False,
+            heterogeneous=False,
             # Other model
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=0.9,
+            alignment_type=None,
+            comm_radius=2.5,
             # Intrinsic reward related
-            alignment_type = "self",
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
             int_rew_beta=1,
@@ -200,4 +224,3 @@ if __name__ == "__main__":
             max_episode_steps=200,
             continuous_actions=True,
         )
-
