@@ -75,12 +75,12 @@ def train(
         trainer,
         name=group_name if model_name.startswith("GPPO") else model_name,
         callbacks=[
-            WandbLoggerCallback(
-                project=f"{scenario_name}{'_test' if ON_MAC else ''}",
-                api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
-                group=group_name,
-                notes=notes,
-            )
+            # WandbLoggerCallback(
+            #     project=f"{scenario_name}{'_test' if ON_MAC else ''}",
+            #     api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
+            #     group=group_name,
+            #     notes=notes,
+            # )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
         stop={"training_iteration": 5000},

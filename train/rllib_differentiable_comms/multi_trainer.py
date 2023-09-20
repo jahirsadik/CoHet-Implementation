@@ -230,7 +230,6 @@ def compute_gae_for_sample_batch(
         for k in keys_to_overwirte:
             sample_batch[k][:, agent_index] = sample_batch_agent[k]
 
-
     return sample_batch
 
 
@@ -360,39 +359,6 @@ def ppo_surrogate_loss(
             }
         )
 
-    # if policy.alignment_type is not None:
-    #     # WM related stuff
-    #     obs_act_all_agents = np.concatenate((
-    #         train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
-    #         train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
-    #         axis=2)
-    #     inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-    #     pred_next_obs_all = []
-    #     for i in range(n_agents):
-    #         pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
-    #         # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
-    #         pred_next_obs_all.append(pred_next_obs_i)
-    #         # states_all.append(state_i)
-
-    #     assert n_agents == len(pred_next_obs_all)
-    #     dyn_model_stats = []
-    #     dyn_models_loss = []
-    #     for i, pred_next_obs in enumerate(pred_next_obs_all):
-    #         agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
-    #         agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
-    #         agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
-    #         agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
-    #         # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
-    #         dyn_model_stats.append(agent_i_dyn_loss_unreduced)
-    #         policy.dyn_models[i].zero_grad()
-    #         agent_i_dyn_loss.backward()
-    #         policy.dyn_model_optims[i].step()
-    #         # print(f"AMMAJAAN: {agent_i_dyn_loss}")
-    #         dyn_models_loss.append(agent_i_dyn_loss)
-        
-    #     model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
-    #     # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
-
     aggregation = torch.mean
     total_loss = aggregation(torch.stack([ld["total_loss"] for ld in loss_data]))
     model.tower_stats["total_loss"] = total_loss
@@ -411,15 +377,7 @@ def ppo_surrogate_loss(
     model.tower_stats["mean_kl_loss"] = aggregation(
         torch.stack([ld["mean_kl"] for ld in loss_data])
     )
-    # infos = train_batch[SampleBatch.INFOS]
-    # if not torch.is_tensor(infos):
-    #     for idx, dyn_model_stat in enumerate(dyn_model_stats):
-    #         infos = [{**d1, **d2} for d1, d2 in zip(infos, dyn_model_stat)]
-
-        # print(f'samplebatch infos: {infos}')
-        # train_batch[SampleBatch.INFOS] = infos
-    # print(f'dyn_models_loss: {dyn_models_loss}')
-    # return aggregation(torch.stack([total_loss] + dyn_models_loss))
+    
     return total_loss
 
 
@@ -467,6 +425,7 @@ class MultiAgentValueNetworkMixin:
 
 class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
     def __init__(self, observation_space, action_space, config):
+        print(f"Initializing MultiPPOTorchPolicy")
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
@@ -540,6 +499,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             pred_next_obs_all = []
             for i in range(n_agents):
                 pred_next_obs_i = self.dyn_models[i](inputs[:, i, :])
+                print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
+                print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
                 print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
                 pred_next_obs_all.append(pred_next_obs_i)
 
@@ -547,18 +508,17 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             # dyn_models_loss = []
 
             for i, pred_next_obs in enumerate(pred_next_obs_all):
-                agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, to_torch(next_obs_batch[:, i]))
+                print(f'pred_next_obs: {pred_next_obs[:, :6].shape}')
+                print(f'next_obs_batch: {next_obs_batch[:, i, :6].shape}')
+                agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs[:, :6], to_torch(next_obs_batch[:, i, :6]))
                 self.dyn_models[i].zero_grad()
                 agent_i_dyn_loss.backward()
                 self.dyn_model_optims[i].step()
-                print(f"AMMAJAAN: {agent_i_dyn_loss}")
+                print(f"Agent{i} dyn model loss: {agent_i_dyn_loss}")
                 # dyn_models_loss.append(agent_i_dyn_loss)
                 if episode is not None:
                     episode.custom_metrics[f"agent {i}/dyn_models_loss"] = agent_i_dyn_loss.item()
             
-            # model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
-            # episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
-            # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
 
 
         if self.alignment_type == "team":
@@ -702,6 +662,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
 
     @override(PPOTrainer)
     def training_step(self) -> ResultDict:
+        print("Inside MultiPPOTrainer training_step()")
         # Collect SampleBatches from sample workers until we have a full batch.
         if self._by_agent_steps:
             assert False
@@ -713,6 +674,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
                 worker_set=self.workers, max_env_steps=self.config["train_batch_size"]
             )
         train_batch = train_batch.as_multi_agent()
+        print(f"Train Batch size: {len(train_batch)}")
         self._counters[NUM_AGENT_STEPS_SAMPLED] += train_batch.agent_steps()
         self._counters[NUM_ENV_STEPS_SAMPLED] += train_batch.env_steps()
         
