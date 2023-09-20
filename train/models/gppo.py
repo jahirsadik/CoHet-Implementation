@@ -595,7 +595,9 @@ class GPPO(TorchModelV2, nn.Module):
     @override(ModelV2)
     def forward(self, input_dict, state, seq_lens):
         # print(f'obs flattened: {input_dict["obs_flat"].shape}')
-        # print(f"Obs len: {len(input_dict['obs'])}\n Single obs shape: {input_dict['obs'][0].shape}")
+        # for i in range(len(input_dict['obs'])):
+        #     print(f"{i}th obs shape: {input_dict['obs'][i].shape}")
+        #     print(f"Sample obs: {input_dict['obs'][i][0]}")
         batch_size = input_dict["obs"][0].shape[0]
         device = input_dict["obs"][0].device
 

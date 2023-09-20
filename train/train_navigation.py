@@ -205,7 +205,7 @@ if __name__ == "__main__":
             topology_type=None,
             comm_radius=0.45,
             # Intrinsic reward related
-            alignment_type = None,
+            alignment_type = "self",
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
             int_rew_beta=.5,

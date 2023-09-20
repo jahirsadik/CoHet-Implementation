@@ -360,38 +360,38 @@ def ppo_surrogate_loss(
             }
         )
 
-    if policy.alignment_type is not None:
-        # WM related stuff
-        obs_act_all_agents = np.concatenate((
-            train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
-            train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
-            axis=2)
-        inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-        pred_next_obs_all = []
-        for i in range(n_agents):
-            pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
-            # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
-            pred_next_obs_all.append(pred_next_obs_i)
-            # states_all.append(state_i)
+    # if policy.alignment_type is not None:
+    #     # WM related stuff
+    #     obs_act_all_agents = np.concatenate((
+    #         train_batch[SampleBatch.OBS].reshape((train_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
+    #         train_batch[SampleBatch.ACTIONS].reshape(train_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
+    #         axis=2)
+    #     inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+    #     pred_next_obs_all = []
+    #     for i in range(n_agents):
+    #         pred_next_obs_i = policy.dyn_models[i](inputs[:, i, :])
+    #         # print(f'pred_next_obs_i: {pred_next_obs_i.shape}')
+    #         pred_next_obs_all.append(pred_next_obs_i)
+    #         # states_all.append(state_i)
 
-        assert n_agents == len(pred_next_obs_all)
-        dyn_model_stats = []
-        dyn_models_loss = []
-        for i, pred_next_obs in enumerate(pred_next_obs_all):
-            agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
-            agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
-            agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
-            agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
-            # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
-            dyn_model_stats.append(agent_i_dyn_loss_unreduced)
-            policy.dyn_models[i].zero_grad()
-            agent_i_dyn_loss.backward()
-            policy.dyn_model_optims[i].step()
-            # print(f"AMMAJAAN: {agent_i_dyn_loss}")
-            dyn_models_loss.append(agent_i_dyn_loss)
+    #     assert n_agents == len(pred_next_obs_all)
+    #     dyn_model_stats = []
+    #     dyn_models_loss = []
+    #     for i, pred_next_obs in enumerate(pred_next_obs_all):
+    #         agent_i_dyn_loss_unreduced = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i], reduction='none')
+    #         agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, train_batch[SampleBatch.NEXT_OBS].reshape(train_batch[SampleBatch.NEXT_OBS].shape[0], n_agents, -1)[:, i])
+    #         agent_i_dyn_loss_unreduced = torch.mean(agent_i_dyn_loss_unreduced, dim=1, keepdim=True).squeeze(dim=1).tolist()
+    #         agent_i_dyn_loss_unreduced = list(map(lambda x: {f'agent_{i}_dyn_loss': x}, agent_i_dyn_loss_unreduced))
+    #         # print(f"ith dyn loss: {len(agent_i_dyn_loss_unreduced)}")
+    #         dyn_model_stats.append(agent_i_dyn_loss_unreduced)
+    #         policy.dyn_models[i].zero_grad()
+    #         agent_i_dyn_loss.backward()
+    #         policy.dyn_model_optims[i].step()
+    #         # print(f"AMMAJAAN: {agent_i_dyn_loss}")
+    #         dyn_models_loss.append(agent_i_dyn_loss)
         
-        model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
-        # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
+    #     model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
+    #     # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
 
     aggregation = torch.mean
     total_loss = aggregation(torch.stack([ld["total_loss"] for ld in loss_data]))
@@ -529,6 +529,38 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape(len(sample_batch), n_agents, -1)
         cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
         
+        if self.alignment_type is not None:
+            obs_act_all_agents = np.concatenate((
+            sample_batch[SampleBatch.OBS].reshape((sample_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
+            sample_batch[SampleBatch.ACTIONS].reshape(sample_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
+            axis=2)
+            inputs = to_torch(obs_act_all_agents, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+            print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
+            print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
+            pred_next_obs_all = []
+            for i in range(n_agents):
+                pred_next_obs_i = self.dyn_models[i](inputs[:, i, :])
+                print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
+                pred_next_obs_all.append(pred_next_obs_i)
+
+            assert n_agents == len(pred_next_obs_all)
+            # dyn_models_loss = []
+
+            for i, pred_next_obs in enumerate(pred_next_obs_all):
+                agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs, to_torch(next_obs_batch[:, i]))
+                self.dyn_models[i].zero_grad()
+                agent_i_dyn_loss.backward()
+                self.dyn_model_optims[i].step()
+                print(f"AMMAJAAN: {agent_i_dyn_loss}")
+                # dyn_models_loss.append(agent_i_dyn_loss)
+                if episode is not None:
+                    episode.custom_metrics[f"agent {i}/dyn_models_loss"] = agent_i_dyn_loss.item()
+            
+            # model.tower_stats["dyn_models_loss"] = torch.Tensor(dyn_models_loss)
+            # episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
+            # print(f"dyn model loss shape: {dyn_models_loss[0].shape}")
+
+
         if self.alignment_type == "team":
             intr_rew_batch = []
             pos_batch = cur_obs_batch[:, :, :2]
@@ -582,7 +614,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
                 true_next_obs = to_torch(next_obs_batch[:, cur_agent_idx, :])
                 l2_loss = torch.mean(torch.nn.functional.mse_loss(self_pred, true_next_obs, reduction='none'), dim=1)
-                print(f"l2 loss: {l2_loss}")
+                # print(f"l2 loss: {l2_loss}")
                 intr_rew_t[:, cur_agent_idx] = -l2_loss # not dividing by num of agents here
             
         # Find common neighbors
