@@ -593,12 +593,23 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
         
         if self.alignment_type is not None:
-            beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
+            int_rew_beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
             c_r =  self.config["model"]["custom_model_config"].get("comm_radius",17)
             print(f"comm range: {c_r}")
-            print(f"Beta value: {beta}")
+            print(f"Beta value: {int_rew_beta}")
             print(f"1/cur_obs_batch.shape[2]: {1 / cur_obs_batch.shape[2]}")
-            intr_rew_t *= beta
+            max_extr = to_torch(np.max(sample_batch[SampleBatch.REWARDS], 0))
+            max_intr = torch.max(intr_rew_t, 0).values
+            print(f"Episode max extrinsic reward: {max_extr}")
+            print(f"Episode max intrinsic reward: {max_intr}")
+            print(f"Intrinsic reward before scaling: {intr_rew_t[0]}")
+            frac = 1
+            if torch.count_nonzero(max_intr) == n_agents: 
+                max_extr_ita_percent = max_extr / int_rew_beta
+                frac = max_extr_ita_percent / max_intr
+                print(f"Intrinsic reward scaling frac: {frac}")
+            intr_rew_t *= -frac
+            print(f"Intrinsic reward after scaling: {intr_rew_t[0]}")
             print(f'intrinsic reward shape: {intr_rew_t.shape}')
             print(f'intrinsic reward final: {intr_rew_t[:20]}')
 

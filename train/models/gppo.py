@@ -600,7 +600,7 @@ class GPPO(TorchModelV2, nn.Module):
         #     print(f"Sample obs: {input_dict['obs'][i][0]}")
         batch_size = input_dict["obs"][0].shape[0]
         device = input_dict["obs"][0].device
-        print(f"input_dict['obs']: {input_dict['obs']}")
+        # print(f"input_dict['obs']: {input_dict['obs']}")
         obs = torch.stack(input_dict["obs"], dim=1)
         if self.add_agent_index:
             agent_index = (
