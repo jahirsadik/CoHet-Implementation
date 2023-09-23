@@ -599,9 +599,11 @@ class GPPO(TorchModelV2, nn.Module):
         #     print(f"{i}th obs shape: {input_dict['obs'][i].shape}")
         #     print(f"Sample obs: {input_dict['obs'][i][0]}")
         batch_size = input_dict["obs"][0].shape[0]
+        # print(f"forward() batch size: {batch_size}")
         device = input_dict["obs"][0].device
         # print(f"input_dict['obs']: {input_dict['obs']}")
         obs = torch.stack(input_dict["obs"], dim=1)
+        # print(f"forward() funct obs shape: {obs.shape}")
         if self.add_agent_index:
             agent_index = (
                 torch.arange(self.n_agents, device=device)
@@ -628,10 +630,11 @@ class GPPO(TorchModelV2, nn.Module):
         ).view(
             batch_size, self.n_agents, self.obs_shape
         )  # This acts like an assertion
-
+        # print(f"forward() function pos and obs_no_pos shape: {pos.shape}, {obs_no_pos.shape}")
         if not self.share_action_value:
             outputs, _ = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
             values, _ = self.gnn_value(obs=obs_no_pos, pos=pos, vel=vel)
+            # print(f"forward() function values shape: {values.shape}")
         else:
             outputs, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
 

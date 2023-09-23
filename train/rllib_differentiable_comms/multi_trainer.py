@@ -473,6 +473,9 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
     def postprocess_trajectory(
         self, sample_batch, other_agent_batches=None, episode=None
     ):
+        
+        with torch.no_grad():
+            sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
         # WM stats here
         dyn_losses_t = self.model.tower_stats.get('dyn_models_loss', None)
         if torch.is_tensor(dyn_losses_t):
@@ -482,13 +485,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
 
         n_agents = len(self.action_space)   # total no of agents
         intr_rew_t = torch.zeros((len(sample_batch), n_agents)) # Initialize empty torch first, to be changed later
-        print(f"int_rew initially: {intr_rew_t[0]}")
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((len(sample_batch), n_agents, -1))
+        int_rew_beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
         next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((len(sample_batch), n_agents, -1))
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape(len(sample_batch), n_agents, -1)
         cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
         
-        if self.alignment_type is not None:
+        if self.alignment_type is not None and episode is not None and int_rew_beta > 0:
             obs_act_all_agents = np.concatenate((
             sample_batch[SampleBatch.OBS].reshape((sample_batch[SampleBatch.OBS].shape[0], n_agents, -1)),
             sample_batch[SampleBatch.ACTIONS].reshape(sample_batch[SampleBatch.ACTIONS].shape[0], n_agents, -1)),
@@ -519,9 +522,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 if episode is not None:
                     episode.custom_metrics[f"agent {i}/dyn_models_loss"] = agent_i_dyn_loss.item()
             
-
-
-        if self.alignment_type == "team":
+        if self.alignment_type == "team" and episode is not None and int_rew_beta > 0:
             intr_rew_batch = []
             pos_batch = cur_obs_batch[:, :, :2]
             next_pos_batch = next_obs_batch[:, :, :2]
@@ -549,74 +550,74 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                     common_neighbors.append(list(set(agent_t) & set(agent_t1)))
                 common_neighbors_batch.append(common_neighbors)
 
+            vf = self.model.value_function()
+            print(f'vf thingy: {vf.shape}')
+
+            weighting = 'average'
+
             for batch_idx, batch_data in enumerate(common_neighbors_batch):
                 intr_rew_agent = []
                 for cur_agent_idx, neighbors in enumerate(batch_data):
                     l2_loss = 0
+                    total_dist = 0
                     for neighbor in neighbors:
                         if cur_agent_idx != neighbor:
+                            neighbor_pos = cur_obs_batch[batch_idx, neighbor, :2]
+                            agent_pos = cur_obs_batch[batch_idx, cur_agent_idx, :2]
+                            dist = 1 / np.sqrt(((agent_pos - neighbor_pos) ** 2).sum())
+                            total_dist += dist
                             # TODO: Find a way to send data in batches
-                            # print(f"input to dyn model: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20)}")
-                            # print(f"shape: {cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, 20).shape}")
                             neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
-                            # print(f"next obs pred shape: {neighbor_pred.shape}")
                             true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
-                            # print(f'true obs shape: {true_next_obs.shape}')
-                            l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)
-                            # print(f"l2 loss shape {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs).shape}")
+                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs) * dist if weighting == 'distance' else 1)
                     # log this l2 loss
-                    intr_rew_agent.append(-l2_loss / len(neighbors))
+                    if weighting == 'distance' and total_dist > 0:
+                        intr_rew_agent.append(-l2_loss / total_dist)
+                    else:
+                        intr_rew_agent.append(-l2_loss / len(neighbors))
                 intr_rew_batch.append(intr_rew_agent)
             intr_rew_t = torch.FloatTensor(intr_rew_batch)
         
-        elif self.alignment_type == "self":
+        elif self.alignment_type == "self" and episode is not None and int_rew_beta > 0:
             for cur_agent_idx in range(n_agents):
                 self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
                 true_next_obs = to_torch(next_obs_batch[:, cur_agent_idx, :])
                 l2_loss = torch.mean(torch.nn.functional.mse_loss(self_pred, true_next_obs, reduction='none'), dim=1)
-                # print(f"l2 loss: {l2_loss}")
                 intr_rew_t[:, cur_agent_idx] = -l2_loss # not dividing by num of agents here
-            
-        # Find common neighbors
-        # rewards = to_torch(sample_batch[SampleBatch.REWARDS]).reshape(-1, 1)
-        # print(f'rewards: {rewards}')
-        # print(f'rewards shape: {rewards.shape}')
-        # intr_rew_mean = intr_rew_t.mean(dim=1, keepdim=True)
-        # print(f"Intrinsic rew mean shape: {intr_rew_mean.shape}")
-        # rewards += (intr_rew_mean * (1 / cur_obs_batch.shape[2]))
-        # sample_batch[SampleBatch.REWARDS] = np.squeeze(rewards.detach().cpu().numpy(), axis=1)
-        # print(f"Samplebatch infos: {sample_batch[SampleBatch.INFOS]}")
-        # print(f"Samplebatch rewards: {sample_batch[SampleBatch.REWARDS]}")
-        # print(f'other agent batch polyamory: {other_agent_batches}')
-
-        with torch.no_grad():
-            sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
         
-        if self.alignment_type is not None:
-            int_rew_beta =  self.config["model"]["custom_model_config"].get("int_rew_beta", (1 / cur_obs_batch.shape[2]))
+
+
+        if self.alignment_type is not None and episode is not None and int_rew_beta > 0:
             c_r =  self.config["model"]["custom_model_config"].get("comm_radius",17)
             print(f"comm range: {c_r}")
             print(f"Beta value: {int_rew_beta}")
             print(f"1/cur_obs_batch.shape[2]: {1 / cur_obs_batch.shape[2]}")
-            max_extr = to_torch(np.max(sample_batch[SampleBatch.REWARDS], 0))
-            max_intr = torch.max(intr_rew_t, 0).values
+            max_extr = to_torch(np.max(np.absolute(sample_batch[SampleBatch.REWARDS]), 0))
+            max_intr = torch.max(torch.abs(intr_rew_t), 0).values
+            print(f"Episode Extrinsic reward shape: {sample_batch[SampleBatch.REWARDS].shape}")
+            print(f"Episode Extrinsic rewards: {sample_batch[SampleBatch.REWARDS][0:50]}")
             print(f"Episode max extrinsic reward: {max_extr}")
             print(f"Episode max intrinsic reward: {max_intr}")
-            print(f"Intrinsic reward before scaling: {intr_rew_t[0]}")
+            print(f"Intrinsic reward before scaling: {intr_rew_t[0:50]}")
             frac = 1
-            if torch.count_nonzero(max_intr) == n_agents: 
-                max_extr_ita_percent = max_extr / int_rew_beta
-                frac = max_extr_ita_percent / max_intr
-                print(f"Intrinsic reward scaling frac: {frac}")
-            intr_rew_t *= -frac
-            print(f"Intrinsic reward after scaling: {intr_rew_t[0]}")
+            print(f"max_intr: {max_intr}, {type(max_intr)}, {max_intr.shape}")
+            print(f"max_extr: {max_intr}, {type(max_extr)}, {max_extr.shape}")
+            for i, val in enumerate(max_intr):
+                print(f"max_intr val: {val} for agent{i}")
+                if val > 0:
+                    max_extr_ita_percent = max_extr[i] / int_rew_beta    
+                    frac = max_extr_ita_percent / abs(val)
+                    print(f"Intrinsic reward scaling frac: {frac}")
+                    intr_rew_t[:, i] *= frac
+                    
+            print(f"Intrinsic reward after scaling: {intr_rew_t[0:50]}")
             print(f'intrinsic reward shape: {intr_rew_t.shape}')
             print(f'intrinsic reward final: {intr_rew_t[:20]}')
-
+            
         # reward logging
         if episode is not None:
             for cur_agent_idx in range(n_agents):
-                if self.alignment_type is not None:
+                if self.alignment_type is not None and episode is not None and int_rew_beta > 0:
                     agent_intr_mean = torch.mean(intr_rew_t[:, cur_agent_idx])
                     episode.custom_metrics[f'agent {cur_agent_idx}/intr_rew'] = agent_intr_mean.item()
                 agent_extr_mean = torch.mean(to_torch(sample_batch[SampleBatch.REWARDS][:, cur_agent_idx]))
@@ -624,10 +625,11 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
 
         # enter rewards for each agent
         print(f'int rew: \n{intr_rew_t[0]}')
-        if self.alignment_type is not None:
+        if self.alignment_type is not None and episode is not None and int_rew_beta > 0:
             print(f'sample batch rew before adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
             sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
             print(f'sample batch rew after adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
+
         return sample_batch
 
 

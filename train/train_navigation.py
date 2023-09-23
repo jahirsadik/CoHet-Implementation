@@ -129,7 +129,7 @@ def train(
                     "vel_start": 2,
                     "vel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": True,
+                    "share_action_value": False,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
@@ -195,7 +195,7 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=True,
+            share_observations=False,
             heterogeneous=True,
             # Other model
             centralised_critic=False,
@@ -205,10 +205,10 @@ if __name__ == "__main__":
             topology_type=None,
             comm_radius=0.45,
             # Intrinsic reward related
-            alignment_type = "self",
+            alignment_type = "team",
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=10,
+            int_rew_beta=20,
             # Env
             max_episode_steps=200,
             continuous_actions=True,
