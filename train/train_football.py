@@ -33,6 +33,7 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    # cohet
     alignment_type,
     comm_radius,
     dyn_model_hidden_units,
@@ -40,6 +41,7 @@ def train(
     intr_rew_beta,
     intr_rew_weighting,
     intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
     seed,
