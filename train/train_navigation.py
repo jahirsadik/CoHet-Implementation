@@ -36,6 +36,7 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    share_action_value,
     # cohet
     alignment_type,
     comm_radius,
@@ -135,7 +136,7 @@ def train(
                     "goal_rel_start": 4,
                     "goal_rel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": False,
+                    "share_action_value": share_action_value,
                     # cohet
                     "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
@@ -206,6 +207,7 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=False,
+            share_action_value=False,
             heterogeneous=True,
             # Other model
             centralised_critic=False,
@@ -214,13 +216,13 @@ if __name__ == "__main__":
             aggr="add",
             topology_type=None,
             # cohet
-            alignment_type = "team",
+            alignment_type="team",
             comm_radius=0.45,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
             intr_rew_beta=20,
-            intr_beta_type = "percent",
-            intr_rew_weighting = 'distance',
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
             # cohet end
             # Env
             max_episode_steps=200,

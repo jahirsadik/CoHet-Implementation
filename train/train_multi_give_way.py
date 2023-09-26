@@ -32,18 +32,23 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
-    dyn_model_hidden_units,
-    dyn_model_layer_num,
-    int_rew_beta,
     use_mlp,
     aggr,
     topology_type,
+    # cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
     seed,
     notes,
     share_action_value,
-    comm_radius,
 ):
     checkpoint_rel_path = "ray_results/joint/HetGIPPO/MultiPPOTrainer_joint_654d9_00000_0_2022-08-23_17-26-52/checkpoint_001349/checkpoint-1349"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
@@ -125,7 +130,6 @@ def train(
                     "use_beta": False,
                     "aggr": aggr,
                     "topology_type": topology_type,
-                    "comm_radius": comm_radius,
                     "use_mlp": use_mlp,
                     "add_agent_index": add_agent_index,
                     "pos_start": 0,
@@ -134,10 +138,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -194,6 +203,7 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=True,
+            share_action_value=False,
             heterogeneous=True,
             # Other model
             share_action_value=True,
@@ -202,11 +212,15 @@ if __name__ == "__main__":
             add_agent_index=True,
             aggr="add",
             topology_type=None,
-            comm_radius=.55,
-            # Intrinsic reward related
+            # cohet
+            alignment_type="team",
+            comm_radius=0.5,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=.5,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=200,
             continuous_actions=True,

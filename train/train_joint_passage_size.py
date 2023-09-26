@@ -67,14 +67,18 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
-    dyn_model_hidden_units,
-    dyn_model_layer_num,
-    int_rew_beta,
-    alignment_type,
     use_mlp,
     aggr,
     topology_type,
+    # cohet
+    alignment_type,
     comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
     seed,
@@ -167,11 +171,15 @@ def train(
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
                     "curriculum": curriculum,
+                    # cohet
+                    "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
-                    "alignment_type": alignment_type,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -195,7 +203,7 @@ def train(
                     "mass_ratio": 1,
                     "mass_position": 0.75,
                     "max_speed_1": None,  # 0.05
-                    "obs_noise": 0.3,
+                    "obs_noise": 0.0003,
                     "n_passages": 4,
                     "middle_angle_180": True,
                 },
@@ -246,12 +254,15 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=float('inf'),
-            # Intrinsic reward related
+            # cohet
+            alignment_type="team",
+            comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta= .5,
-            alignment_type = None,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=300,
             continuous_actions=True,

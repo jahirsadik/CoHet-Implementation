@@ -57,12 +57,16 @@ def train(
     max_episode_steps,
     use_mlp,
     aggr,
+    # cohet
+    alignment_type,
+    comm_radius,
     dyn_model_hidden_units,
     dyn_model_layer_num,
-    int_rew_beta,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     topology_type,
-    comm_range,
-    comm_radius,
     add_agent_index,
     continuous_actions,
     seed,
@@ -153,10 +157,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": True,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -172,7 +181,7 @@ def train(
                     "n_agents": 5,
                     "n_targets": n_targets,
                     "agents_per_target": 2,
-                    "lidar_range": comm_range,
+                    "lidar_range": comm_radius,
                     "covering_range": 0.25,
                     "agent_collision_penalty": 0,
                     "covering_rew_coeff": 1,
@@ -217,12 +226,15 @@ if __name__ == "__main__":
         add_agent_index=False,
         aggr="add",
         topology_type=None,
-        comm_range=0.35,
-        comm_radius=0.35,
-        # Intrinsic reward related
+        # cohet
+        alignment_type = "team",
+        comm_radius=0.45,
         dyn_model_hidden_units=128,
         dyn_model_layer_num=2,
-        int_rew_beta=.5,
+        intr_rew_beta=20,
+        intr_beta_type = "percent",
+        intr_rew_weighting = 'distance',
+        # cohet end
         # Env
         max_episode_steps=300,
         continuous_actions=True,

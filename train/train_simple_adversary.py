@@ -31,16 +31,21 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
-    dyn_model_hidden_units,
-    dyn_model_layer_num,
-    int_rew_beta,
     use_mlp,
     aggr,
     topology_type,
+    # cohet
     alignment_type,
     comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
+    share_action_value,
     seed,
     notes,
 ):
@@ -127,12 +132,16 @@ def train(
                     "vel_start": 2,
                     "vel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": True,
+                    "share_action_value": share_action_value,
+                    # cohet
+                    "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
-                    "alignment_type": alignment_type,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -183,6 +192,7 @@ if __name__ == "__main__":
             notes="",
             # Model important
             share_observations=True,
+            share_action_value=False,
             heterogeneous=True,
             # Other model
             centralised_critic=False,
@@ -190,12 +200,15 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=0.9,
-            # Intrinsic reward related
-            alignment_type = "self",
+            # cohet
+            alignment_type="team",
+            comm_radius=0.45,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=1,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=200,
             continuous_actions=True,

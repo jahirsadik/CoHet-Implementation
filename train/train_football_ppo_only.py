@@ -33,14 +33,18 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
-    dyn_model_hidden_units,
-    dyn_model_layer_num,
-    int_rew_beta,
     use_mlp,
     aggr,
-    topology_type,
+    # cohet
     alignment_type,
     comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
+    topology_type,
     add_agent_index,
     continuous_actions,
     seed,
@@ -86,10 +90,15 @@ def train(
         "vel_dim": 2,
         "model": {
             "custom_model_config": {
+                # cohet
+                "alignment_type": alignment_type,
+                "comm_radius": comm_radius,
                 "dyn_model_hidden_units": dyn_model_hidden_units,
                 "dyn_model_layer_num": dyn_model_layer_num,
-                "int_rew_beta": int_rew_beta,
-                "alignment_type": alignment_type,
+                "intr_rew_beta": intr_rew_beta,
+                "intr_beta_type": intr_beta_type,
+                "intr_rew_weighting": intr_rew_weighting,
+                # cohet end
             },
         },
     })
@@ -143,7 +152,6 @@ def train(
                     "use_beta": False,
                     "aggr": aggr,
                     "topology_type": None,
-                    "comm_radius": comm_radius,
                     "use_mlp": use_mlp,
                     "add_agent_index": add_agent_index,
                     "pos_start": 0,
@@ -151,10 +159,15 @@ def train(
                     "vel_start": 2,
                     "vel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": True,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -214,12 +227,15 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            alignment_type=None,
-            comm_radius=2.5,
-            # Intrinsic reward related
+            # cohet
+            alignment_type="team",
+            comm_radius=0.45,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=1,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting ='distance',
+            # cohet end
             # Env
             max_episode_steps=200,
             continuous_actions=True,
