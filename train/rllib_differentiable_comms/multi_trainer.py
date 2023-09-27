@@ -16,7 +16,7 @@ from torch.optim import Adam
 from gym.spaces import Discrete, Box
 import numpy as np
 import ray
-from ray.rllib.agents.ppo import PPOTrainer
+from ray.rllib.algorithms.ppo import PPO as PPOTrainer
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPOTorchPolicy
 from ray.rllib.algorithms.ppo.ppo_tf_policy import validate_config
@@ -61,7 +61,7 @@ from ray.rllib.utils.torch_utils import (
     explained_variance,
     sequence_mask,
 )
-from ray.rllib.utils.typing import AgentID, TensorType, ResultDict, TrainerConfigDict
+from ray.rllib.utils.typing import AgentID, TensorType, ResultDict
 from ray.rllib.utils.typing import PolicyID, SampleBatchType
 from rllib_differentiable_comms.utils import to_torch
 
@@ -140,7 +140,8 @@ def compute_gae_for_sample_batch(
     Returns:
         SampleBatch: The postprocessed, modified SampleBatch (or a new one).
     """
-    n_agents = len(policy.action_space)
+    # print(f"Num of agents: {sample_batch[SampleBatch.AGENT_INDEX]}")
+    n_agents = 2
 
     if sample_batch[SampleBatch.INFOS].dtype == "float32":
         # The trajectory view API will pass populate the info dict with a np.zeros((ROLLOUT_SIZE,))
@@ -173,8 +174,8 @@ def compute_gae_for_sample_batch(
         # samplebatch_infos_rewards = SampleBatch(ROLLOUT_SIZE: ['0', '1', '2']) if there are 3 agents
         # (i.e. it has ROLLOUT_SIZE entries with keys '0','1','2')
 
-    if not isinstance(policy.action_space, gym.spaces.tuple.Tuple):
-        raise InvalidActionSpace("Expect tuple action space")
+    # if not isinstance(policy.action_space, gym.spaces.tuple.Tuple):
+    #     raise InvalidActionSpace("Expect tuple action space")
 
     keys_to_overwirte = [
         SampleBatch.REWARDS,
