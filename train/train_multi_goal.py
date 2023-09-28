@@ -41,6 +41,15 @@ def train(
     max_episode_steps,
     use_mlp,
     aggr,
+    #cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     topology_type,
     add_agent_index,
     continuous_actions,
@@ -134,6 +143,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -177,7 +195,7 @@ def train(
         else config,
     )
 
-
+# THIS FILE SCENARIO DOESN'T EXIST
 if __name__ == "__main__":
     TrainingUtils.init_ray(scenario_name=scenario_name, local_mode=ON_MAC)
     for seed in [2]:
@@ -186,16 +204,25 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=False,
+            share_observations=True,
             heterogeneous=False,
             # Other model
-            share_action_value=True,
+            share_action_value=False,
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
-            topology_type="full",
+            topology_type=None,
+            # cohet
+            alignment_type="team",
+            comm_radius= 5,
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
-            max_episode_steps=100,
+            max_episode_steps=200,
             continuous_actions=True,
         )

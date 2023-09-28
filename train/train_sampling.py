@@ -39,12 +39,20 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    #cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
     seed,
     notes,
     share_action_value,
-    comm_radius,
 ):
     checkpoint_rel_path = "ray_results/joint/HetGIPPO/MultiPPOTrainer_joint_654d9_00000_0_2022-08-23_17-26-52/checkpoint_001349/checkpoint-1349"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
@@ -136,7 +144,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -146,7 +162,12 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
-                "scenario_config": {"n_agents": 3, "comms_range": comm_radius},
+                # Scenario configured
+                "scenario_config": {
+                    "n_agents": 3, 
+                    "comms_range": comm_radius,
+                    "lidar_range": 0.75,
+                },
             },
             "evaluation_interval": 20,
             "evaluation_duration": 1,
@@ -187,13 +208,21 @@ if __name__ == "__main__":
             share_observations=True,
             heterogeneous=True,
             # Other model
-            share_action_value=True,
+            share_action_value=False,
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
             topology_type="full" if not radius else None,
-            comm_radius=-1 if not radius else 5,
+            # cohet
+            alignment_type="team",
+            comm_radius=-1 if not radius else .5,
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=200,
             continuous_actions=True,

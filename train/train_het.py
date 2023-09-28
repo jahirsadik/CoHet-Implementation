@@ -171,7 +171,7 @@ if __name__ == "__main__":
         restore=False,
         notes="",
         # Model important
-        share_observations=False,
+        share_observations=True,
         heterogeneous=True,
         # Other model
         centralised_critic=False,
@@ -180,6 +180,6 @@ if __name__ == "__main__":
         aggr="add",
         topology_type="full",
         # Env
-        max_episode_steps=100,
+        max_episode_steps=200,
         continuous_actions=True,
     )

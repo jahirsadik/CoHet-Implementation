@@ -24,7 +24,7 @@ rollout_fragment_length = (
     else train_batch_size // (num_workers * num_envs_per_worker)
 )
 scenario_name = "simple_spread"
-model_name = "MyFullyConnectedNetwork"
+model_name = "GPPO"
 
 
 def train(
@@ -33,13 +33,19 @@ def train(
     restore,
     heterogeneous,
     max_episode_steps,
+    share_action_value,
+    # cohet
+    alignment_type,
+    comm_radius,
     dyn_model_hidden_units,
     dyn_model_layer_num,
-    int_rew_beta,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     use_mlp,
     aggr,
     topology_type,
-    comm_radius,
     add_agent_index,
     continuous_actions,
     seed,
@@ -86,7 +92,7 @@ def train(
             "custom_model_config": {
                 "dyn_model_hidden_units": dyn_model_hidden_units,
                 "dyn_model_layer_num": dyn_model_layer_num,
-                "int_rew_beta": int_rew_beta,
+                "intr_rew_beta": intr_rew_beta,
             },
         },
     })
@@ -95,12 +101,12 @@ def train(
         trainer,
         name=group_name if model_name.startswith("GPPO") else model_name,
         callbacks=[
-            WandbLoggerCallback(
-                project=f"{scenario_name}{'_test' if ON_MAC else ''}",
-                api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
-                group=group_name,
-                notes=notes,
-            )
+            # WandbLoggerCallback(
+            #     project=f"{scenario_name}{'_test' if ON_MAC else ''}",
+            #     api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
+            #     group=group_name,
+            #     notes=notes,
+            # )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
         stop={"training_iteration": 5000},
@@ -148,10 +154,16 @@ def train(
                     "vel_start": 2,
                     "vel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": True,
+                    "share_action_value": share_action_value,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
-                    "int_rew_beta": int_rew_beta,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 }
                 if model_name == "GPPO"
                 else fcnet_model_config,
@@ -163,8 +175,10 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
+                # Scenario configured
                 "scenario_config": {
                     "n_agents": 3,
+                    "obs_agents": True,
                 },
             },
             "evaluation_interval": 20,
@@ -198,19 +212,24 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=False,
-            heterogeneous=False,
+            share_observations=True,
+            share_action_value=False,
+            heterogeneous=True,
             # Other model
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
             topology_type=None,
-            comm_radius=0.35,
-            # Intrinsic reward related
+            # cohet
+            alignment_type="team",
+            comm_radius=0.45,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            int_rew_beta=1,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=200,
             continuous_actions=True,

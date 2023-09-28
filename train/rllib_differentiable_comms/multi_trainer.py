@@ -569,7 +569,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
 
             intr_rew_weighting = self.config["model"]["custom_model_config"].get('intr_rew_weighting', 'average')
             print(f'selected weighting: {intr_rew_weighting}')
-
+            print(f"Common neighbors batch: {common_neighbors_batch[:10]}")
             for batch_idx, batch_data in enumerate(common_neighbors_batch):
                 intr_rew_agent = []
                 for cur_agent_idx, neighbors in enumerate(batch_data):

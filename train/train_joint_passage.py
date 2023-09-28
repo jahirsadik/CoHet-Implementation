@@ -138,6 +138,7 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
+                # Scenario configured
                 "scenario_config": {
                     "fixed_passage": True,
                     "n_passages": 1,
@@ -145,17 +146,17 @@ def train(
                     "random_goal_angle": True,
                     "pos_shaping_factor": 1,
                     "rot_shaping_factor": 1,
-                    "collision_reward": 0,  # -0.06
+                    "collision_reward": -0.06,  # -0.06
                     "energy_reward_coeff": 0,
                     "joint_length": 0.5,
-                    "observe_joint_angle": False,
+                    "observe_joint_angle": True,
                     "joint_angle_obs_noise": 0.0,
                     "asym_package": True,
                     "mass_ratio": 5,
                     "mass_position": 0.75,
                     "max_speed_1": None,  # 0.05
                     "all_passed_rot": True,
-                    "obs_noise": 0.15,
+                    "obs_noise": 0.0001,
                     "use_controller": False,
                 },
             },
@@ -199,13 +200,22 @@ if __name__ == "__main__":
             share_observations=True,
             heterogeneous=True,
             # Other model
-            share_action_value=True,
+            share_action_value=False,
             centralised_critic=False,
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
-            topology_type="full",
+            topology_type=None,
+            # cohet
+            alignment_type="team",
+            comm_radius=0.75,
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
-            max_episode_steps=300,
+            max_episode_steps=200,
             continuous_actions=True,
         )

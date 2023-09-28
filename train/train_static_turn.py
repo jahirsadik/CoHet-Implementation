@@ -180,7 +180,7 @@ if __name__ == "__main__":
         restore=False,
         notes="",
         # Model important
-        share_observations=False,
+        share_observations=True,
         heterogeneous=True,
         # Other model
         centralised_critic=False,

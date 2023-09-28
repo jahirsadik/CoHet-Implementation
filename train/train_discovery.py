@@ -57,6 +57,7 @@ def train(
     max_episode_steps,
     use_mlp,
     aggr,
+    share_action_value,
     # cohet
     alignment_type,
     comm_radius,
@@ -111,7 +112,7 @@ def train(
             )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
-        stop={"training_iteration": 5000},
+        stop={"training_iteration": 2000},
         restore=str(checkpoint_path) if restore else None,
         config={
             "seed": seed,
@@ -155,7 +156,7 @@ def train(
                     "pos_dim": 2,
                     "vel_start": 2,
                     "vel_dim": 2,
-                    "share_action_value": True,
+                    "share_action_value": share_action_value,
                     "trainer": trainer_name,
                     # cohet
                     "alignment_type": alignment_type,
@@ -177,13 +178,14 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
+                # scenario config checked
                 "scenario_config": {
                     "n_agents": 5,
                     "n_targets": n_targets,
                     "agents_per_target": 2,
-                    "lidar_range": comm_radius,
-                    "covering_range": 0.25,
-                    "agent_collision_penalty": 0,
+                    "lidar_range": comm_radius + 0.1,
+                    "covering_range": comm_radius - 0.1,
+                    "agent_collision_penalty": 0.005,
                     "covering_rew_coeff": 1,
                     "targets_respawn": True,
                     "time_penalty": 0,
@@ -219,7 +221,8 @@ if __name__ == "__main__":
         notes="curriculum every 100 -1 target",
         # Model important
         share_observations=True,
-        heterogeneous=False,
+        share_action_value = False,
+        heterogeneous=True,
         # Other model
         centralised_critic=False,
         use_mlp=False,
@@ -227,15 +230,15 @@ if __name__ == "__main__":
         aggr="add",
         topology_type=None,
         # cohet
-        alignment_type = "team",
+        alignment_type="team",
         comm_radius=0.45,
         dyn_model_hidden_units=128,
         dyn_model_layer_num=2,
         intr_rew_beta=20,
-        intr_beta_type = "percent",
-        intr_rew_weighting = 'distance',
+        intr_beta_type="percent",
+        intr_rew_weighting="distance",
         # cohet end
         # Env
-        max_episode_steps=300,
+        max_episode_steps=200,
         continuous_actions=True,
     )

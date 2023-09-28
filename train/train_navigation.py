@@ -164,15 +164,17 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
+                # scenario config checked
                 "scenario_config": {
-                    "n_agents": 3,
+                    "n_agents": 4,
                     "lidar_range": comm_radius,
                     "agent_radius": 0.1,
                     "shared_rew": False,
                     "pos_shaping_factor": 1,
-                    "final_reward": 0.005,
+                    "final_reward": 0.1,
                     "comm_range": comm_radius,
                     "agent_collision_penalty": -.5,
+                    "observe_all_goals": False,
                 },
             },
             "evaluation_interval": 20,
@@ -206,7 +208,7 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=False,
+            share_observations=True,
             share_action_value=False,
             heterogeneous=True,
             # Other model
@@ -217,7 +219,7 @@ if __name__ == "__main__":
             topology_type=None,
             # cohet
             alignment_type="team",
-            comm_radius=0.45,
+            comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
             intr_rew_beta=20,

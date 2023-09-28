@@ -33,6 +33,7 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    share_action_value,
     # cohet
     alignment_type,
     comm_radius,
@@ -130,7 +131,7 @@ def train(
                     "vel_start": 2,
                     "vel_dim": 2,
                     "trainer": trainer_name,
-                    "share_action_value": True,
+                    "share_action_value": share_action_value,
                     "alignment_type": alignment_type,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
@@ -149,8 +150,9 @@ def train(
                 "continuous_actions": continuous_actions,
                 "max_steps": max_episode_steps,
                 # Env specific
+                # Scenario configured
                 "scenario_config": {
-                    "dense_reward_ratio": 0.000001,
+                    "dense_reward_ratio": 0.1,
                     "max_speed": .9,
                     "ball_max_speed": 0.9,
                     "ball_size": .03,
@@ -190,7 +192,8 @@ if __name__ == "__main__":
             restore=False,
             notes="",
             # Model important
-            share_observations=False,
+            share_observations=True,
+            share_action_value=False,
             heterogeneous=True,
             # Other model
             centralised_critic=False,
@@ -198,14 +201,15 @@ if __name__ == "__main__":
             add_agent_index=False,
             aggr="add",
             topology_type=None,
+           # cohet
+            alignment_type="team",
             comm_radius=2,
-            # Intrinsic reward related
-            alignment_type = "team",
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
             intr_rew_beta=20,
-            intr_beta_type = "percent",
-            intr_rew_weighting = 'distance',
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=250,
             continuous_actions=True,

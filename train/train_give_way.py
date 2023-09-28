@@ -58,6 +58,15 @@ def train(
     seed,
     notes,
     share_action_value,
+    # cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
 ):
     checkpoint_rel_path = "ray_results/joint/HetGIPPO/MultiPPOTrainer_joint_654d9_00000_0_2022-08-23_17-26-52/checkpoint_001349/checkpoint-1349"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
@@ -94,12 +103,12 @@ def train(
         checkpoint_at_end=True,
         checkpoint_score_attr="episode_reward_mean",
         callbacks=[
-            WandbLoggerCallback(
-                project=f"{scenario_name}{'_test' if ON_MAC else ''}",
-                api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
-                group=group_name,
-                notes=notes,
-            )
+            # WandbLoggerCallback(
+            #     project=f"{scenario_name}{'_test' if ON_MAC else ''}",
+            #     api_key_file=str(PathUtils.scratch_dir / "wandb_api_key_file"),
+            #     group=group_name,
+            #     notes=notes,
+            # )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
         stop={"training_iteration": 5000},
@@ -151,6 +160,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -218,7 +236,16 @@ if __name__ == "__main__":
             use_mlp=False,
             add_agent_index=False,
             aggr="add",
-            topology_type="full",
+            topology_type=None,
+            # cohet
+            alignment_type="team",
+            comm_radius=0.75,
+            dyn_model_hidden_units=128,
+            dyn_model_layer_num=2,
+            intr_rew_beta=20,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
+            # cohet end
             # Env
             max_episode_steps=500,
             continuous_actions=True,
