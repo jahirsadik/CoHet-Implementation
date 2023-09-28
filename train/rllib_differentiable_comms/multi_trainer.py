@@ -430,6 +430,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         config = dict(ray.rllib.algorithms.ppo.ppo.PPOConfig().to_dict(), **config)
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
+        print(f"Dhuksi MultiPPOTorchPolicy te os:{observation_space}, ac:{action_space}")
         self.alignment_type = config["model"]["custom_model_config"].get("alignment_type", None)
         if self.alignment_type is not None:
             obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents

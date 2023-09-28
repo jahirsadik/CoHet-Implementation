@@ -226,6 +226,6 @@ if __name__ == "__main__":
             # cohet end
             # Env
             max_episode_steps=200,
-            continuous_actions=True,
+            continuous_actions=False,
         )
 

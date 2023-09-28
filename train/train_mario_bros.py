@@ -17,12 +17,14 @@ from ray.rllib.algorithms.ppo import PPO as PPOTrainer
 from ray.rllib.algorithms.ppo import PPOTorchPolicy
 from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
+from rllib_differentiable_comms.multi_action_dist import (
+    TorchHomogeneousMultiActionDistribution,
+)
 
 from ray.rllib.env.wrappers.pettingzoo_env import PettingZooEnv
 from pettingzoo.atari import mario_bros_v3
 
-from gym import spaces
-import numpy as np
+from models.gppo import GPPO
 
 ON_MAC = True
 SCRATCH_DIR = Path('/Users/jahirsadikmonon/Codes/scratch/')
@@ -105,9 +107,42 @@ def train(
             "train_batch_size": 5000,
             "lr": 0.0003,
             "gamma": 0.99,
+            "_enable_rl_module_api": False,
+            "_enable_learner_api": False,
             "model": {
-                "fcnet_hiddens": [256, 256],
-                "fcnet_activation": "relu",
+                "custom_model": "GPPO",
+                "custom_action_dist": "hom_multi_action",
+                "custom_model_config": {
+                    "activation_fn": "relu",
+                    "share_observations": share_observations,
+                    "gnn_type": "MatPosConv",
+                    "centralised_critic": centralised_critic,
+                    "heterogeneous": heterogeneous,
+                    "use_beta": False,
+                    "aggr": aggr,
+                    "topology_type": None,
+                    "use_mlp": use_mlp,
+                    "add_agent_index": add_agent_index,
+                    "pos_start": 0,
+                    "pos_dim": 2,
+                    "vel_start": 2,
+                    "vel_dim": 2,
+                    "goal_rel_start": 4,
+                    "goal_rel_dim": 2,
+                    "trainer": trainer_name,
+                    "share_action_value": share_action_value,
+                    # cohet
+                    # "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
+                    # "dyn_model_hidden_units": dyn_model_hidden_units,
+                    # "dyn_model_layer_num": dyn_model_layer_num,
+                    # "intr_rew_beta": intr_rew_beta,
+                    # "intr_beta_type": intr_beta_type,
+                    # "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
+                }
+                if model_name == "GPPO"
+                else fcnet_model_config,
             },
             # "env_config": {
             #     "device": "cpu",
@@ -134,6 +169,10 @@ if __name__ == "__main__":
         )
         print("Ray init!")
         register_env(scenario_name, lambda config: make_env())
+        ModelCatalog.register_custom_model("GPPO", GPPO)
+        ModelCatalog.register_custom_action_dist(
+            "hom_multi_action", TorchHomogeneousMultiActionDistribution
+        )
 
     for seed in [2]:
         train(
@@ -151,7 +190,7 @@ if __name__ == "__main__":
             aggr="add",
             topology_type=None,
             # cohet
-            alignment_type="team",
+            alignment_type=None,
             comm_radius=0.45,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
@@ -161,6 +200,6 @@ if __name__ == "__main__":
             # cohet end
             # Env
             max_episode_steps=200,
-            continuous_actions=True,
+            continuous_actions=False,
         )
 

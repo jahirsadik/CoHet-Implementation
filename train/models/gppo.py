@@ -14,6 +14,7 @@ from torch import Tensor
 from torch import nn
 from torch_geometric.nn import MessagePassing, GINEConv, GraphConv, GATv2Conv
 from torch_geometric.transforms import BaseTransform
+import math
 import wandb
 
 PRINT_FLAG = True
@@ -496,7 +497,7 @@ class GPPO(TorchModelV2, nn.Module):
 
         topology_types = {"full", "ring", "line"}
 
-        self.n_agents = len(obs_space.original_space)
+        self.n_agents = 2
         self.outputs_per_agent = int(num_outputs / self.n_agents)
         self._cur_value = None
 
@@ -524,7 +525,7 @@ class GPPO(TorchModelV2, nn.Module):
         if self.centralised_critic and self.share_action_value:
             assert self.use_mlp
 
-        self.obs_shape = obs_space.original_space[0].shape[0]
+        self.obs_shape = math.prod([dim for dim in obs_space.shape])
         # Remove position
         self.obs_shape -= self.pos_dim
         if self.add_agent_index:
