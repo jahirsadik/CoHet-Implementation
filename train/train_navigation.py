@@ -166,7 +166,7 @@ def train(
                 # Env specific
                 # scenario config checked
                 "scenario_config": {
-                    "n_agents": 4,
+                    "n_agents": 5,
                     "lidar_range": comm_radius,
                     "agent_radius": 0.1,
                     "shared_rew": False,

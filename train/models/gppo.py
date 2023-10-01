@@ -449,8 +449,10 @@ class GPPOBranch(nn.Module):
                     graph.edge_attr,
                 ).view(batch_size, self.n_agents, self.hidden_size)
 
+        # print(f'embedding dims: {embedding.shape}')
+
         if self.hetero_decoders:
-            embedding = torch.stack(
+            embedding2 = torch.stack(
                 [
                     decoder(torch.cat([obs[:, i], embedding[:, i]], dim=-1))
                     for i, decoder in enumerate(self.decoders)
@@ -458,24 +460,24 @@ class GPPOBranch(nn.Module):
                 dim=1,
             )
         else:
-            embedding = self.decoders[0](torch.cat([obs, embedding], dim=-1))
+            embedding2 = self.decoders[0](torch.cat([obs, embedding], dim=-1))
 
         if self.hetero_decoders:
             out = torch.stack(
-                [head(embedding[:, i]) for i, head in enumerate(self.heads)],
+                [head(embedding2[:, i]) for i, head in enumerate(self.heads)],
                 dim=1,
             )
             if self.double_output:
                 out2 = torch.stack(
-                    [head2(embedding[:, i]) for i, head2 in enumerate(self.heads2)],
+                    [head2(embedding2[:, i]) for i, head2 in enumerate(self.heads2)],
                     dim=1,
                 )
         else:
-            out = self.heads[0](embedding)
+            out = self.heads[0](embedding2)
             if self.double_output:
-                out2 = self.heads2[0](embedding)
+                out2 = self.heads2[0](embedding2)
 
-        return out, (out2 if self.double_output else None)
+        return out, embedding, (out2 if self.double_output else None)
 
     def share_init_hetero_networks(self):
         for child in self.children():
@@ -517,8 +519,10 @@ class GPPO(TorchModelV2, nn.Module):
         self.topology_type = cfg.get("topology_type", None)
         self.comm_radius_processed = cfg.get("comm_radius", -1)
 
-        assert self.topology_type in topology_types or self.comm_radius_processed > 0
+        self.embedding = None
 
+        assert self.topology_type in topology_types or self.comm_radius_processed > 0
+        
         if self.use_mlp:
             assert self.share_observations and self.centralised_critic
         if self.centralised_critic and self.share_action_value:
@@ -603,7 +607,7 @@ class GPPO(TorchModelV2, nn.Module):
         device = input_dict["obs"][0].device
         # print(f"input_dict['obs']: {input_dict['obs']}")
         obs = torch.stack(input_dict["obs"], dim=1)
-        # print(f"forward() funct obs shape: {obs.shape}")
+        print(f"forward() funct obs shape: {obs.shape}")
         if self.add_agent_index:
             agent_index = (
                 torch.arange(self.n_agents, device=device)
@@ -632,12 +636,16 @@ class GPPO(TorchModelV2, nn.Module):
         )  # This acts like an assertion
         # print(f"forward() function pos and obs_no_pos shape: {pos.shape}, {obs_no_pos.shape}")
         if not self.share_action_value:
-            outputs, _ = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
-            values, _ = self.gnn_value(obs=obs_no_pos, pos=pos, vel=vel)
+            # print(f"Inside GPPO forward() not share action value")
+            outputs, embedding, _ = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
+            values, v_embedding, _ = self.gnn_value(obs=obs_no_pos, pos=pos, vel=vel)
             # print(f"forward() function values shape: {values.shape}")
         else:
-            outputs, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
-
+            outputs, embedding, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
+            
+        self.embedding = embedding
+        print(f"GPPO embedding shape: {embedding.shape}")
+        
         values = values.view(batch_size, self.n_agents)
         if self.trainer == "PPOTrainer":
             assert self.n_agents == 1
@@ -647,10 +655,14 @@ class GPPO(TorchModelV2, nn.Module):
         outputs = outputs.view(batch_size, self.n_agents * self.outputs_per_agent)
 
         assert not outputs.isnan().any()
-
+        # print(f"GPPO Output dim: {len(outputs)}")
         return outputs, state
 
     @override(ModelV2)
     def value_function(self):
+        # print(f"GPPO value function")
         assert self._cur_value is not None, "must call forward() first"
         return self._cur_value
+
+
+

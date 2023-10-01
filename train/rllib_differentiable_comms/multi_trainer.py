@@ -249,6 +249,7 @@ def ppo_surrogate_loss(
         Union[TensorType, List[TensorType]]: A single loss tensor or a list
             of loss tensors.
     """
+    # print(f"ppo_surrogate_loss model: {model}")
     # print(f"SAMPLE BATCH INFOS: {train_batch[SampleBatch.INFOS]}")
     # print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
     # print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
@@ -292,6 +293,7 @@ def ppo_surrogate_loss(
 
     # Compute a value function loss.
     if policy.config["use_critic"]:
+        # print(f"Calling model value_function()")
         value_fn_out = model.value_function()
     else:
         value_fn_out = torch.tensor(0.0, device=logp_ratio.device)
@@ -407,6 +409,7 @@ class MultiAgentValueNetworkMixin:
                 multiple values. Instead, we call .item() in
                 compute_gae_for_sample_batch above.
                 """
+                print(f"MultiAgentValueNetworkMixin value()")
                 input_dict = SampleBatch(input_dict)
                 input_dict = self._lazy_tensor_dict(input_dict)
                 model_out, _ = self.model(input_dict)
@@ -416,7 +419,7 @@ class MultiAgentValueNetworkMixin:
 
         # When not doing GAE, we do not require the value function's output.
         else:
-
+            print(f"MultiAgentValueNetworkMixin value()")
             def value(*args, **kwargs):
                 return 0.0
 
@@ -482,6 +485,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             dyn_losses = dyn_losses_t.tolist()
             for cur_agent_idx, dyn_loss in enumerate(dyn_losses):
                 episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
+
+        print(f"Moe More: {self.model.embedding.shape}")
 
         batch_size = len(sample_batch)
         n_agents = len(self.action_space)   # total no of agents
@@ -564,8 +569,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                     common_neighbors.append(list(set(agent_t) & set(agent_t1)))
                 common_neighbors_batch.append(common_neighbors)
 
-            vf = self.model.value_function()
-            print(f'vf thingy: {vf.shape}')
 
             intr_rew_weighting = self.config["model"]["custom_model_config"].get('intr_rew_weighting', 'average')
             print(f'selected weighting: {intr_rew_weighting}')

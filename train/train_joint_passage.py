@@ -40,6 +40,15 @@ def train(
     seed,
     notes,
     share_action_value,
+    # cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
 ):
     checkpoint_rel_path = "ray_results/joint/GIPPO/MultiPPOTrainer_joint_9b1c9_00000_0_2022-09-01_10-08-12/checkpoint_000099/checkpoint-99"
     checkpoint_path = PathUtils.scratch_dir / checkpoint_rel_path
@@ -158,6 +167,15 @@ def train(
                     "all_passed_rot": True,
                     "obs_noise": 0.0001,
                     "use_controller": False,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "evaluation_interval": 20,
