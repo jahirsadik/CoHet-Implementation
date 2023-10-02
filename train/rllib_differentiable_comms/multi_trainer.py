@@ -253,6 +253,10 @@ def ppo_surrogate_loss(
     # print(f"SAMPLE BATCH INFOS: {train_batch[SampleBatch.INFOS]}")
     # print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
     # print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
+    from datetime import datetime
+    print(f"Calling model forward() function from ppo_surrogate_loss with batch size {len(train_batch)} at {datetime.now().strftime('%H:%M:%S')}")
+    print(f"train_batch size: {len(train_batch)}")
+    print(f"Train batch example: {train_batch[SampleBatch.OBS][:1]}")
     logits, state = model(train_batch)
     # logits has shape (BATCH, num_agents * num_outputs_per_agent)
     curr_action_dist = dist_class(logits, model)
@@ -438,8 +442,8 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
             self.dyn_models = [WorldModel(num_agent = len(action_space), 
                                             layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
-                                            input_dim = (obs_dim + act_dim), 
-                                            output_dim = obs_dim, 
+                                            input_dim = (obs_dim + act_dim) if config["model"]["custom_model_config"].get("use_ggpo_dyn", False) else obs_dim, # TODO @deeparghya check
+                                            output_dim = obs_dim if config["model"]["custom_model_config"].get("use_ggpo_dyn", False) else 128, # TODO @deeparghya what instead of 128?
                                             hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
                                             device=config["env_config"]["device"]).to(config["env_config"]["device"])
                             for _ in range(len(action_space))]
@@ -476,7 +480,11 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
     def postprocess_trajectory(
         self, sample_batch, other_agent_batches=None, episode=None
     ):
-        
+        from datetime import datetime
+        print(f"postprocess_trajectory called at {datetime.now().strftime('%H:%M:%S')}")
+        print(f"train_batch size: {sample_batch[SampleBatch.OBS].shape}")
+        print(f"Train batch example: {sample_batch[SampleBatch.OBS][:1]}")
+
         with torch.no_grad():
             sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
         # WM stats here
@@ -497,6 +505,10 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((batch_size, n_agents, -1))
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))
         cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
+
+        # TODO: Wrap with if statements, keep another config type for 'h'
+        gppo_outputs = self.model.get_gppo_embedding(to_torch(to_torch(cur_obs_batch)), self.config["env_config"]["device"]).to(self.config["env_config"]["device"])
+        print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs[:2]}")
         
         train_start_index = 0
         if "goal_rel_start" in self.config["model"]["custom_model_config"]:
@@ -514,14 +526,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))),
             axis=2)
             inputs = to_torch(obs_act_all_agents, dtype=torch.float)
-            print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
-            print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
+            # print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
+            # print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
             pred_next_obs_all = []
             for i in range(n_agents):
                 pred_next_obs_i = self.dyn_models[i](inputs[:, i, :])
-                print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
-                print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
-                print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
+                # print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
+                # print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
+                # print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
                 pred_next_obs_all.append(pred_next_obs_i)
 
             assert n_agents == len(pred_next_obs_all)
@@ -704,6 +716,7 @@ class MultiPPOTrainer(PPOTrainer, ABC):
                 worker_set=self.workers, max_agent_steps=self.config["train_batch_size"]
             )
         else:
+            print(f"Calling synchronous_parallel_sample from MultiPPOTrainer")
             train_batch = synchronous_parallel_sample(
                 worker_set=self.workers, max_env_steps=self.config["train_batch_size"]
             )

@@ -15,6 +15,7 @@ from torch import nn
 from torch_geometric.nn import MessagePassing, GINEConv, GraphConv, GATv2Conv
 from torch_geometric.transforms import BaseTransform
 import wandb
+from ray.rllib.policy.sample_batch import SampleBatch
 
 PRINT_FLAG = True
 
@@ -607,7 +608,8 @@ class GPPO(TorchModelV2, nn.Module):
         device = input_dict["obs"][0].device
         # print(f"input_dict['obs']: {input_dict['obs']}")
         obs = torch.stack(input_dict["obs"], dim=1)
-        print(f"forward() funct obs shape: {obs.shape}")
+        print(f"GPPO forward() function obs: {obs[:2]}")
+        # print(f"forward() funct obs shape: {obs.shape}")
         if self.add_agent_index:
             agent_index = (
                 torch.arange(self.n_agents, device=device)
@@ -644,7 +646,7 @@ class GPPO(TorchModelV2, nn.Module):
             outputs, embedding, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
             
         self.embedding = embedding
-        print(f"GPPO embedding shape: {embedding.shape}")
+        # print(f"GPPO embedding shape: {embedding.shape}")
         
         values = values.view(batch_size, self.n_agents)
         if self.trainer == "PPOTrainer":
@@ -653,11 +655,54 @@ class GPPO(TorchModelV2, nn.Module):
         self._cur_value = values
 
         outputs = outputs.view(batch_size, self.n_agents * self.outputs_per_agent)
-
+        print(f"GPPO forward() function embedding: {embedding[:2]}")
         assert not outputs.isnan().any()
         # print(f"GPPO Output dim: {len(outputs)}")
         return outputs, state
 
+    def get_gppo_embedding(self, cur_obs_batch, device):
+        batch_size = cur_obs_batch.shape[0]
+        print(f"get_gppo_embedding() batch size: {batch_size}")
+        print(f"get_gppo_embedding() input cur_obs_batch: {cur_obs_batch[:2]}")
+        device = device
+        obs = cur_obs_batch
+        if self.add_agent_index:
+            agent_index = (
+                torch.arange(self.n_agents, device=device)
+                .repeat(batch_size, 1)
+                .unsqueeze(-1)
+            )
+            obs = torch.cat((obs, agent_index), dim=-1)
+        pos = (
+            obs[..., self.pos_start : self.pos_start + self.pos_dim]
+            if self.pos_dim > 0
+            else None
+        )
+        vel = (
+            obs[..., self.vel_start : self.vel_start + self.vel_dim]
+            if self.vel_dim > 0
+            else None
+        )
+        obs_no_pos = torch.cat(
+            [
+                obs[..., : self.pos_start],
+                obs[..., self.pos_start + self.pos_dim :],
+            ],
+            dim=-1,
+        ).view(
+            batch_size, self.n_agents, self.obs_shape
+        )  # This acts like an assertion
+
+        if not self.share_action_value:
+            outputs, embedding, _ = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
+            values, v_embedding, _ = self.gnn_value(obs=obs_no_pos, pos=pos, vel=vel)
+        else:
+            outputs, embedding, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
+            
+        print(f"GPPO embedding shape: {embedding.shape}")
+        assert not outputs.isnan().any()
+        return embedding
+    
     @override(ModelV2)
     def value_function(self):
         # print(f"GPPO value function")
