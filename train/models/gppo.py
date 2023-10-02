@@ -608,7 +608,7 @@ class GPPO(TorchModelV2, nn.Module):
         device = input_dict["obs"][0].device
         # print(f"input_dict['obs']: {input_dict['obs']}")
         obs = torch.stack(input_dict["obs"], dim=1)
-        print(f"GPPO forward() function obs: {obs[:2]}")
+        # print(f"GPPO forward() function obs: {obs[:2]}")
         # print(f"forward() funct obs shape: {obs.shape}")
         if self.add_agent_index:
             agent_index = (
@@ -655,15 +655,15 @@ class GPPO(TorchModelV2, nn.Module):
         self._cur_value = values
 
         outputs = outputs.view(batch_size, self.n_agents * self.outputs_per_agent)
-        print(f"GPPO forward() function embedding: {embedding[:2]}")
+        # print(f"GPPO forward() function embedding: {embedding[:2]}")
         assert not outputs.isnan().any()
         # print(f"GPPO Output dim: {len(outputs)}")
         return outputs, state
 
     def get_gppo_embedding(self, cur_obs_batch, device):
         batch_size = cur_obs_batch.shape[0]
-        print(f"get_gppo_embedding() batch size: {batch_size}")
-        print(f"get_gppo_embedding() input cur_obs_batch: {cur_obs_batch[:2]}")
+        # print(f"get_gppo_embedding() batch size: {batch_size}")
+        # print(f"get_gppo_embedding() input cur_obs_batch: {cur_obs_batch[:2]}")
         device = device
         obs = cur_obs_batch
         if self.add_agent_index:
@@ -699,7 +699,7 @@ class GPPO(TorchModelV2, nn.Module):
         else:
             outputs, embedding, values = self.gnn(obs=obs_no_pos, pos=pos, vel=vel)
             
-        print(f"GPPO embedding shape: {embedding.shape}")
+        # print(f"GPPO embedding shape: {embedding.shape}")
         assert not outputs.isnan().any()
         return embedding
     

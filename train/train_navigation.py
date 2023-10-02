@@ -39,7 +39,7 @@ def train(
     share_action_value,
     # cohet
     alignment_type,
-    use_ggpo_dyn,
+    use_gppo_dyn,
     comm_radius,
     dyn_model_hidden_units,
     dyn_model_layer_num,
@@ -140,7 +140,7 @@ def train(
                     "share_action_value": share_action_value,
                     # cohet
                     "alignment_type": alignment_type,
-                    "use_ggpo_dyn": use_ggpo_dyn,
+                    "use_ggpo_dyn": use_gppo_dyn,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
@@ -168,7 +168,7 @@ def train(
                 # Env specific
                 # scenario config checked
                 "scenario_config": {
-                    "n_agents": 2,
+                    "n_agents": 4,
                     "lidar_range": comm_radius,
                     "agent_radius": 0.1,
                     "shared_rew": False,
@@ -221,7 +221,7 @@ if __name__ == "__main__":
             topology_type=None,
             # cohet
             alignment_type="team",
-            use_ggpo_dyn=False,
+            use_gppo_dyn=True,
             comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,

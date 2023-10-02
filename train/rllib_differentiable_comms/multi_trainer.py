@@ -254,9 +254,9 @@ def ppo_surrogate_loss(
     # print(f"batch agent index shape: {train_batch.columns([SampleBatch.AGENT_INDEX])}")
     # print(f"batch actions shape: {train_batch.columns([SampleBatch.ACTIONS])[0].shape}")
     from datetime import datetime
-    print(f"Calling model forward() function from ppo_surrogate_loss with batch size {len(train_batch)} at {datetime.now().strftime('%H:%M:%S')}")
-    print(f"train_batch size: {len(train_batch)}")
-    print(f"Train batch example: {train_batch[SampleBatch.OBS][:1]}")
+    # print(f"Calling model forward() function from ppo_surrogate_loss with batch size {len(train_batch)} at {datetime.now().strftime('%H:%M:%S')}")
+    # print(f"train_batch size: {len(train_batch)}")
+    # print(f"Train batch example: {train_batch[SampleBatch.OBS][:1]}")
     logits, state = model(train_batch)
     # logits has shape (BATCH, num_agents * num_outputs_per_agent)
     curr_action_dist = dist_class(logits, model)
@@ -437,13 +437,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         # TODO: Move into Policy API, if needed at all here. Why not move this into
         #  `PPOConfig`?.
         self.alignment_type = config["model"]["custom_model_config"].get("alignment_type", None)
+        self.use_gppo_dyn = config["model"]["custom_model_config"].get("use_gppo_dyn", False)
         if self.alignment_type is not None:
             obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
             act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
             self.dyn_models = [WorldModel(num_agent = len(action_space), 
                                             layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
-                                            input_dim = (obs_dim + act_dim) if config["model"]["custom_model_config"].get("use_ggpo_dyn", False) else obs_dim, # TODO @deeparghya check
-                                            output_dim = obs_dim if config["model"]["custom_model_config"].get("use_ggpo_dyn", False) else 128, # TODO @deeparghya what instead of 128?
+                                            input_dim = (128 + act_dim) if self.use_gppo_dyn else (obs_dim + act_dim), # TODO @deeparghya check
+                                            output_dim = 128 if self.use_gppo_dyn else obs_dim, # TODO @deeparghya what instead of 128?
                                             hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
                                             device=config["env_config"]["device"]).to(config["env_config"]["device"])
                             for _ in range(len(action_space))]
@@ -483,7 +484,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         from datetime import datetime
         print(f"postprocess_trajectory called at {datetime.now().strftime('%H:%M:%S')}")
         print(f"train_batch size: {sample_batch[SampleBatch.OBS].shape}")
-        print(f"Train batch example: {sample_batch[SampleBatch.OBS][:1]}")
+        # print(f"Train batch example: {sample_batch[SampleBatch.OBS][:1]}")
 
         with torch.no_grad():
             sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
@@ -494,22 +495,28 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             for cur_agent_idx, dyn_loss in enumerate(dyn_losses):
                 episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
 
-        print(f"Moe More: {self.model.embedding.shape}")
-
         batch_size = len(sample_batch)
         n_agents = len(self.action_space)   # total no of agents
         intr_rew_t = torch.zeros((batch_size, n_agents)) # Initialize empty torch first, to be changed later
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1))
-        intr_rew_beta =  self.config["model"]["custom_model_config"].get("intr_rew_beta", (1 / cur_obs_batch.shape[2]))
+        default_beta = 1 / 128 if self.use_gppo_dyn else 1 / cur_obs_batch.shape[2]
+        intr_rew_beta =  self.config["model"]["custom_model_config"].get("intr_rew_beta", default_beta)
         intr_beta_type = self.config["model"]["custom_model_config"].get("intr_beta_type", "normal")
+        
         next_obs_batch = sample_batch[SampleBatch.NEXT_OBS].reshape((batch_size, n_agents, -1))
         act_batch = sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))
         cur_obs_act_batch = to_torch(np.concatenate((cur_obs_batch, act_batch), axis=2))
 
-        # TODO: Wrap with if statements, keep another config type for 'h'
-        gppo_outputs = self.model.get_gppo_embedding(to_torch(to_torch(cur_obs_batch)), self.config["env_config"]["device"]).to(self.config["env_config"]["device"])
-        print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs[:2]}")
-        
+        gppo_outputs_cur_obs = None
+        gppo_outputs_next_obs = None
+        cur_h_act_all_agents = None
+        if self.alignment_type is not None and episode is not None and intr_rew_beta > 0 and self.use_gppo_dyn is True:
+            gppo_outputs_cur_obs = self.model.get_gppo_embedding(to_torch(cur_obs_batch), self.config["env_config"]["device"])
+            print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs_cur_obs[:2]}")
+            gppo_outputs_next_obs = self.model.get_gppo_embedding(to_torch(next_obs_batch), self.config["env_config"]["device"])
+            print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs_next_obs[:2]}")
+            cur_h_act_all_agents = np.concatenate((gppo_outputs_cur_obs, act_batch), axis=2)
+
         train_start_index = 0
         if "goal_rel_start" in self.config["model"]["custom_model_config"]:
             assert "goal_rel_dim" in self.config["model"]["custom_model_config"]
@@ -520,29 +527,36 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         vel_start_index = self.config["model"]["custom_model_config"].get("vel_start", 2)
         vel_end_index = vel_start_index + self.config["model"]["custom_model_config"].get("vel_dim", 2)
         
+        # Training the dynamics model with batch data
         if self.alignment_type is not None and episode is not None and intr_rew_beta > 0:
-            obs_act_all_agents = np.concatenate((
-            sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1)),
-            sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))),
-            axis=2)
-            inputs = to_torch(obs_act_all_agents, dtype=torch.float)
+            # if not self.use_gppo_dyn:
+            #     obs_act_all_agents = np.concatenate((
+            #     sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1)),
+            #     sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))), axis=2)
+            
+            inputs = to_torch(cur_h_act_all_agents) if self.use_gppo_dyn else to_torch(cur_obs_act_batch, dtype=torch.float) 
             # print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
             # print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
-            pred_next_obs_all = []
+            pred_next_obs_or_h_all = []
             for i in range(n_agents):
-                pred_next_obs_i = self.dyn_models[i](inputs[:, i, :])
-                # print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
+                pred_next_obs_or_h_i = self.dyn_models[i](inputs[:, i, :])
+                # print(f"Agent{i} Predicted next observation0: {pred_next_obs_or_h_i[0:10]}")
                 # print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
-                # print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
-                pred_next_obs_all.append(pred_next_obs_i)
+                # print(f'pred_next_obs_or_h_i shape: {pred_next_obs_or_h_i.shape}')
+                pred_next_obs_or_h_all.append(pred_next_obs_or_h_i)
 
-            assert n_agents == len(pred_next_obs_all)
+            assert n_agents == len(pred_next_obs_or_h_all)
             # dyn_models_loss = []
-
-            for i, pred_next_obs in enumerate(pred_next_obs_all):
-                print(f'pred_next_obs: {pred_next_obs[:, train_start_index:train_end_index].shape}')
-                print(f'next_obs_batch: {next_obs_batch[:, i, train_start_index:train_end_index].shape}')
-                agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs[:, train_start_index:train_end_index], to_torch(next_obs_batch[:, i, train_start_index:train_end_index]))
+            for i, pred_next_obs_or_h_i in enumerate(pred_next_obs_or_h_all):
+                # print(f'pred_next_obs_or_h_i: {pred_next_obs_or_h_i[:, train_start_index:train_end_index].shape}')
+                # print(f'next_obs_batch: {next_obs_batch[:, i, train_start_index:train_end_index].shape}')
+                if self.use_gppo_dyn:
+                    agent_i_dyn_loss = torch.nn.functional.mse_loss(
+                        pred_next_obs_or_h_i,
+                        gppo_outputs_next_obs[:, i, :])
+                else:
+                    agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs_or_h_i[:, train_start_index:train_end_index], 
+                                                                    to_torch(next_obs_batch[:, i, train_start_index:train_end_index]))
                 self.dyn_models[i].zero_grad()
                 agent_i_dyn_loss.backward()
                 self.dyn_model_optims[i].step()
@@ -555,6 +569,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
 
         if self.alignment_type == "team" and episode is not None and intr_rew_beta > 0:
             intr_rew_batch = []
+            # calculate which neighbors are in the neighborhood at time t and t+1
             pos_batch = cur_obs_batch[:, :, pos_start_index:pos_end_index]
             next_pos_batch = next_obs_batch[:, :, pos_start_index:pos_end_index]
             dist_t = np.sqrt(((pos_batch[:, :, None] - pos_batch[:, None]) ** 2).sum(axis=3))
@@ -563,7 +578,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             dist_t1_edges = [np.argwhere(inner_arr < comm_radius) for inner_arr in dist_t1]
             neighbors_t_batch = []
             neighbors_t1_batch = []
-            # calculate which neighbors are in the neighborhood at time t and t+1
             for sample_t, sample_t1 in zip(dist_t_edges, dist_t1_edges):
                 _, counts_t = np.unique(sample_t[:, 0], return_counts=True)
                 _, counts_t1 = np.unique(sample_t1[:, 0], return_counts=True)
@@ -581,7 +595,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                     common_neighbors.append(list(set(agent_t) & set(agent_t1)))
                 common_neighbors_batch.append(common_neighbors)
 
-
             intr_rew_weighting = self.config["model"]["custom_model_config"].get('intr_rew_weighting', 'average')
             print(f'selected weighting: {intr_rew_weighting}')
             print(f"Common neighbors batch: {common_neighbors_batch[:10]}")
@@ -597,9 +610,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                             dist_inv = 1 / np.sqrt(((agent_pos - neighbor_pos) ** 2).sum())
                             total_dist_inv += dist_inv
                             # TODO: Find a way to send data in batches
-                            neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
-                            true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
-                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs) * dist_inv if intr_rew_weighting == 'distance' else 1)
+                            if self.use_gppo_dyn:
+                                neighbor_pred = self.dyn_models[neighbor](cur_h_act_all_agents[batch_idx, cur_agent_idx, :].view(1, -1))
+                                true_next_obs_or_h = to_torch(gppo_outputs_next_obs.reshape(1, -1))
+                            else:
+                                neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
+                                true_next_obs_or_h = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
+                            
+                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs_or_h) * dist_inv if intr_rew_weighting == 'distance' else 1)
                     # log this l2 loss
                     if intr_rew_weighting == 'distance' and total_dist_inv > 0:
                         intr_rew_agent.append(-l2_loss / total_dist_inv)
@@ -610,9 +628,13 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         
         elif self.alignment_type == "self" and episode is not None and intr_rew_beta > 0:
             for cur_agent_idx in range(n_agents):
-                self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
-                true_next_obs = to_torch(next_obs_batch[:, cur_agent_idx, :])
-                l2_loss = torch.mean(torch.nn.functional.mse_loss(self_pred, true_next_obs, reduction='none'), dim=1)
+                if self.use_gppo_dyn:
+                    self_pred = self.dyn_models[cur_agent_idx](cur_h_act_all_agents[:, cur_agent_idx, :])
+                    true_next_obs_or_h = gppo_outputs_next_obs[:, cur_agent_idx, :]
+                else:
+                    self_pred = self.dyn_models[cur_agent_idx](cur_obs_act_batch[:, cur_agent_idx, :])
+                    true_next_obs_or_h = to_torch(next_obs_batch[:, cur_agent_idx, :])
+                l2_loss = torch.mean(torch.nn.functional.mse_loss(self_pred, true_next_obs_or_h, reduction='none'), dim=1)
                 intr_rew_t[:, cur_agent_idx] = -l2_loss # not dividing by num of agents here
         
 
