@@ -166,10 +166,10 @@ def train(
                 # Env specific
                 # scenario config checked
                 "scenario_config": {
-                    "n_agents": 8,
-                    "n_packages": 20,
-                    "package_width": 1.0,
-                    "package_length": 0.5,
+                    "n_agents": 4,
+                    "n_packages": 1,
+                    "package_width": 0.15,
+                    "package_length": 0.15,
                     "package_mass": 10,
                 },
             },
@@ -214,7 +214,7 @@ if __name__ == "__main__":
             aggr="add",
             topology_type=None,
             # cohet
-            alignment_type="team",
+            alignment_type=None,
             comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,

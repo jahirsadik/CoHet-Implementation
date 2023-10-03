@@ -117,7 +117,7 @@ class RelVel(BaseTransform):
 
 
 def batch_from_rllib_to_ptg(
-    x,
+    batch_data,
     pos: Tensor = None,
     vel: Tensor = None,
     edge_index: Tensor = None,
@@ -126,10 +126,10 @@ def batch_from_rllib_to_ptg(
     distance: bool = True,
     rel_vel: bool = True,
 ) -> torch_geometric.data.Batch:
-    batch_size = x.shape[0]
-    n_agents = x.shape[1]
+    batch_size = batch_data.shape[0]
+    n_agents = batch_data.shape[1]
 
-    x = x.view(-1, x.shape[-1])
+    batch_data = batch_data.view(-1, batch_data.shape[-1])
     if pos is not None:
         pos = pos.view(-1, pos.shape[-1])
     if vel is not None:
@@ -139,14 +139,14 @@ def batch_from_rllib_to_ptg(
         edge_index is not None or comm_radius > 0
     )
 
-    b = torch.arange(batch_size, device=x.device)
+    b = torch.arange(batch_size, device=batch_data.device)
 
     graphs = torch_geometric.data.Batch()
     graphs.ptr = torch.arange(0, (batch_size + 1) * n_agents, n_agents)
     graphs.batch = torch.repeat_interleave(b, n_agents)
     graphs.pos = pos
     graphs.vel = vel
-    graphs.x = x
+    graphs.batch_data = batch_data
     graphs.edge_attr = None
     # print(f'pos before: {graphs.pos}')
 
@@ -166,7 +166,7 @@ def batch_from_rllib_to_ptg(
             graphs.pos, batch=graphs.batch, r=comm_radius, loop=False
         )
 
-    graphs = graphs.to(x.device)    
+    graphs = graphs.to(batch_data.device)    
 
     if pos is not None and rel_pos:
         graphs = torch_geometric.transforms.Cartesian(norm=False)(graphs)
@@ -194,11 +194,11 @@ def batch_from_rllib_to_ptg(
 
 
 class MatPosConv(MessagePassing):
-    propagate_type = {"x": Tensor, "edge_attr": Tensor}
+    propagate_type = {"batch_data": Tensor, "edge_attr": Tensor}
 
     def __init__(self, in_dim, out_dim, edge_features, **cfg):
         super().__init__(aggr=cfg["aggr"])
-
+        # print(f"MessagePassing: indim -> {in_dim}, outdim -> {out_dim} edge_features -> {edge_features}")
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.edge_features = edge_features
@@ -210,16 +210,16 @@ class MatPosConv(MessagePassing):
             torch.nn.Linear(self.out_dim, self.out_dim),
         )
 
-    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Tensor) -> Tensor:
+    def forward(self, batch_data: Tensor, edge_index: Tensor, edge_attr: Tensor) -> Tensor:
         out = self.propagate(
             edge_index,
-            x=x,
+            batch_data=batch_data,
             edge_attr=edge_attr,
         )
         return out
 
-    def message(self, x_i: Tensor, x_j: Tensor, edge_attr: Tensor) -> Tensor:
-        msg = self.message_encoder(torch.cat([x_j, edge_attr], dim=-1))
+    def message(self, batch_data_i: Tensor, batch_data_j: Tensor, edge_attr: Tensor) -> Tensor:
+        msg = self.message_encoder(torch.cat([batch_data_j, edge_attr], dim=-1))
         return msg
 
 
@@ -277,15 +277,15 @@ class GNN(nn.Module):
         else:
             assert False
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, batch_data, edge_index, edge_attr):
         if self.gnn_type == "GraphConv":
-            out = self.gnn(x, edge_index)
+            out = self.gnn(batch_data, edge_index)
         elif (
             self.gnn_type == "GATv2Conv"
             or self.gnn_type == "GINEConv"
             or self.gnn_type == "MatPosConv"
         ):
-            out = self.gnn(x, edge_index, edge_attr)
+            out = self.gnn(batch_data, edge_index, edge_attr)
         else:
             assert False
 
@@ -421,8 +421,9 @@ class GPPOBranch(nn.Module):
                 )
 
         else:
+            # print("Dhuksi")
             graph = batch_from_rllib_to_ptg(
-                x=obs,
+                batch_data=obs,
                 pos=pos,
                 vel=vel,
                 edge_index=self.edge_index,
@@ -432,7 +433,7 @@ class GPPOBranch(nn.Module):
             if self.hetero_gnns:
                 embedding = torch.stack(
                     [
-                        gnn(graph.x, graph.edge_index, graph.edge_attr).view(
+                        gnn(graph.batch_data, graph.edge_index, graph.edge_attr).view(
                             batch_size,
                             self.n_agents,
                             self.hidden_size,
@@ -444,7 +445,7 @@ class GPPOBranch(nn.Module):
 
             else:
                 embedding = self.gnns[0](
-                    graph.x,
+                    graph.batch_data,
                     graph.edge_index,
                     graph.edge_attr,
                 ).view(batch_size, self.n_agents, self.hidden_size)
@@ -554,6 +555,7 @@ class GPPO(TorchModelV2, nn.Module):
             )
 
         if not self.share_action_value:
+            # print("Dhuksi 2")
             self.gnn = GPPOBranch(
                 in_features=self.obs_shape,
                 out_features=self.outputs_per_agent,

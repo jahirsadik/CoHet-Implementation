@@ -217,9 +217,9 @@ if __name__ == "__main__":
             comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            intr_rew_beta=20,
-            intr_beta_type="percent",
-            intr_rew_weighting="distance",
+            intr_rew_beta=100,
+            intr_beta_type="normal",
+            intr_rew_weighting="average",
             # cohet end
             # Env
             max_episode_steps=200,

@@ -35,6 +35,15 @@ def train(
     use_mlp,
     aggr,
     topology_type,
+    # cohet
+    alignment_type,
+    comm_radius,
+    dyn_model_hidden_units,
+    dyn_model_layer_num,
+    intr_rew_beta,
+    intr_rew_weighting,
+    intr_beta_type,
+    # cohet end
     add_agent_index,
     continuous_actions,
     seed,
@@ -68,11 +77,6 @@ def train(
     tune.run(
         trainer,
         name=group_name if model_name == "GPPO" else model_name,
-        checkpoint_freq=1,
-        keep_checkpoints_num=2,
-        max_failures=0,
-        checkpoint_at_end=True,
-        checkpoint_score_attr="episode_reward_mean",
         callbacks=[
             WandbLoggerCallback(
                 project=f"{scenario_name}{'_test' if ON_MAC else ''}",
@@ -129,6 +133,15 @@ def train(
                     "vel_dim": 2,
                     "share_action_value": share_action_value,
                     "trainer": trainer_name,
+                    # cohet
+                    "alignment_type": alignment_type,
+                    "comm_radius": comm_radius,
+                    "dyn_model_hidden_units": dyn_model_hidden_units,
+                    "dyn_model_layer_num": dyn_model_layer_num,
+                    "intr_rew_beta": intr_rew_beta,
+                    "intr_beta_type": intr_beta_type,
+                    "intr_rew_weighting": intr_rew_weighting,
+                    # cohet end
                 },
             },
             "env_config": {
@@ -156,7 +169,7 @@ def train(
                     "mass_position": 0.75,
                     "max_speed_1": None,  # 0.05
                     "all_passed_rot": True,
-                    "obs_noise": 0.0001,
+                    "obs_noise": 0.0,
                     "use_controller": False,
                 },
             },
