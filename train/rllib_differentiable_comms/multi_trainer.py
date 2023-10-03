@@ -515,7 +515,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs_cur_obs[:2]}")
             gppo_outputs_next_obs = self.model.get_gppo_embedding(to_torch(next_obs_batch), self.config["env_config"]["device"])
             print(f"GPPO outputs in postprocess_trajectory(): {gppo_outputs_next_obs[:2]}")
-            cur_h_act_all_agents = np.concatenate((gppo_outputs_cur_obs, act_batch), axis=2)
+            cur_h_act_all_agents = torch.cat((gppo_outputs_cur_obs, to_torch(act_batch)), dim=2)
 
         train_start_index = 0
         if "goal_rel_start" in self.config["model"]["custom_model_config"]:
@@ -534,7 +534,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             #     sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1)),
             #     sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))), axis=2)
             
-            inputs = to_torch(cur_h_act_all_agents) if self.use_gppo_dyn else to_torch(cur_obs_act_batch, dtype=torch.float) 
+            inputs = cur_h_act_all_agents if self.use_gppo_dyn else to_torch(cur_obs_act_batch, dtype=torch.float) 
             # print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
             # print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
             pred_next_obs_or_h_all = []
@@ -558,7 +558,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                     agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs_or_h_i[:, train_start_index:train_end_index], 
                                                                     to_torch(next_obs_batch[:, i, train_start_index:train_end_index]))
                 self.dyn_models[i].zero_grad()
-                agent_i_dyn_loss.backward()
+                agent_i_dyn_loss.backward(retain_graph=True)  # TODO: Why do we need this after adding h?
                 self.dyn_model_optims[i].step()
                 print(f"Agent{i} dyn model loss: {agent_i_dyn_loss}")
                 # dyn_models_loss.append(agent_i_dyn_loss)
@@ -612,11 +612,11 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                             # TODO: Find a way to send data in batches
                             if self.use_gppo_dyn:
                                 neighbor_pred = self.dyn_models[neighbor](cur_h_act_all_agents[batch_idx, cur_agent_idx, :].view(1, -1))
-                                true_next_obs_or_h = to_torch(gppo_outputs_next_obs.reshape(1, -1))
+                                true_next_obs_or_h = to_torch(gppo_outputs_next_obs[batch_idx, cur_agent_idx, :].reshape(1, -1))
                             else:
                                 neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
                                 true_next_obs_or_h = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
-                            
+                                
                             l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs_or_h) * dist_inv if intr_rew_weighting == 'distance' else 1)
                     # log this l2 loss
                     if intr_rew_weighting == 'distance' and total_dist_inv > 0:

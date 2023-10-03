@@ -140,7 +140,7 @@ def train(
                     "share_action_value": share_action_value,
                     # cohet
                     "alignment_type": alignment_type,
-                    "use_ggpo_dyn": use_gppo_dyn,
+                    "use_gppo_dyn": use_gppo_dyn,
                     "comm_radius": comm_radius,
                     "dyn_model_hidden_units": dyn_model_hidden_units,
                     "dyn_model_layer_num": dyn_model_layer_num,
