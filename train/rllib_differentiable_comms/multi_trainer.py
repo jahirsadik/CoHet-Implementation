@@ -438,13 +438,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         #  `PPOConfig`?.
         self.alignment_type = config["model"]["custom_model_config"].get("alignment_type", None)
         self.use_gppo_dyn = config["model"]["custom_model_config"].get("use_gppo_dyn", False)
+        embedding_dim = config["model"]["custom_model_config"]["embedding_dim"]
         if self.alignment_type is not None:
             obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
             act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
             self.dyn_models = [WorldModel(num_agent = len(action_space), 
                                             layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
-                                            input_dim = (128 + act_dim) if self.use_gppo_dyn else (obs_dim + act_dim), # TODO @deeparghya check
-                                            output_dim = 128 if self.use_gppo_dyn else obs_dim, # TODO @deeparghya what instead of 128?
+                                            input_dim = (embedding_dim + act_dim) if self.use_gppo_dyn else (obs_dim + act_dim), # TODO @deeparghya check
+                                            output_dim = embedding_dim if self.use_gppo_dyn else obs_dim, # TODO @deeparghya what instead of 128?
                                             hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
                                             device=config["env_config"]["device"]).to(config["env_config"]["device"])
                             for _ in range(len(action_space))]

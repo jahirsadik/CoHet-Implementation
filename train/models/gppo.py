@@ -319,7 +319,7 @@ class GPPOBranch(nn.Module):
         self.edge_index = edge_index
         self.comm_radius = comm_radius_processed
 
-        self.hidden_size = 128
+        self.hidden_size = cfg["embedding_dim"]
 
         self.activation_fn = get_activation_fn(cfg["activation_fn"])
 

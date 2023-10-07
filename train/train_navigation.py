@@ -121,6 +121,7 @@ def train(
                 "custom_action_dist": "hom_multi_action",
                 "custom_model_config": {
                     "activation_fn": "relu",
+                    "embedding_dim": 256,
                     "share_observations": share_observations,
                     "gnn_type": "MatPosConv",
                     "centralised_critic": centralised_critic,
