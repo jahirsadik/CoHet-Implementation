@@ -166,7 +166,7 @@ def train(
                 # Env specific
                 # scenario config checked
                 "scenario_config": {
-                    "n_agents": 8,
+                    "n_agents": 6,
                     "package_width": 1.0,
                     "package_length": 0.5,
                     "package_mass": 10,
@@ -197,7 +197,7 @@ def train(
 if __name__ == "__main__":
     TrainingUtils.init_ray(scenario_name=scenario_name, local_mode=ON_MAC)
 
-    for seed in [2]:
+    for seed in [0]:
         train(
             seed=seed,
             restore=False,
@@ -214,12 +214,12 @@ if __name__ == "__main__":
             topology_type=None,
             # cohet
             alignment_type="team",
-            comm_radius=0.75,
+            comm_radius=1.25,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            intr_rew_beta=100,
-            intr_beta_type="normal",
-            intr_rew_weighting="average",
+            intr_rew_beta=15,
+            intr_beta_type="percent",
+            intr_rew_weighting="distance",
             # cohet end
             # Env
             max_episode_steps=200,

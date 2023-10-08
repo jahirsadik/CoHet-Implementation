@@ -169,7 +169,7 @@ def train(
                     "mass_position": 0.75,
                     "max_speed_1": None,  # 0.05
                     "all_passed_rot": True,
-                    "obs_noise": 0.0,
+                    "obs_noise": 0.0001,
                     "use_controller": False,
                 },
             },
@@ -204,7 +204,7 @@ def train(
 if __name__ == "__main__":
     TrainingUtils.init_ray(scenario_name=scenario_name, local_mode=True)
 
-    for seed in [0, 1, 2]:
+    for seed in [1]:
         train(
             seed=seed,
             restore=False,
@@ -224,9 +224,9 @@ if __name__ == "__main__":
             comm_radius=0.75,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            intr_rew_beta=20,
-            intr_beta_type="percent",
-            intr_rew_weighting="distance",
+            intr_rew_beta=2,
+            intr_beta_type="normal",
+            intr_rew_weighting="average",
             # cohet end
             # Env
             max_episode_steps=200,

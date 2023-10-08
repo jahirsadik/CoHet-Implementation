@@ -6,6 +6,7 @@ PyTorch's policy class used for PPO.
 #  All rights reserved.
 
 import logging
+import pprint
 from abc import ABC
 from typing import Dict
 from typing import List, Optional, Union, Tuple, Iterable
@@ -496,8 +497,10 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         train_start_index = 0
         if "goal_rel_start" in self.config["model"]["custom_model_config"]:
             assert "goal_rel_dim" in self.config["model"]["custom_model_config"]
-        train_end_index = self.config["model"]["custom_model_config"].get("goal_rel_start", cur_obs_batch.shape[2]) + self.config["model"]["custom_model_config"].get("goal_rel_dim", 0)
-        
+        # train_end_index = self.config["model"]["custom_model_config"].get("goal_rel_start", cur_obs_batch.shape[2]) + self.config["model"]["custom_model_config"].get("goal_rel_dim", 0)
+        train_end_index = cur_obs_batch.shape[2] # changes made to see if dyn model works better
+        # print(f"TRAIN END INDEX {cur_obs_batch.shape}")
+
         pos_start_index = self.config["model"]["custom_model_config"].get("pos_start", 0)
         pos_end_index = pos_start_index + self.config["model"]["custom_model_config"].get("pos_dim", 2)
         vel_start_index = self.config["model"]["custom_model_config"].get("vel_start", 2)
@@ -509,27 +512,27 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             sample_batch[SampleBatch.ACTIONS].reshape((batch_size, n_agents, -1))),
             axis=2)
             inputs = to_torch(obs_act_all_agents, dtype=torch.float)
-            print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
-            print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
+            # print(f"cur_obs0: {cur_obs_batch.shape},\n act_batch: {act_batch.shape},\n inputs: {inputs.shape}")
+            # print(f"cur_obs0: {cur_obs_batch[0]}\nact_batch0: {act_batch[0]}\ninputs0: {inputs[0]}")
             pred_next_obs_all = []
             for i in range(n_agents):
                 pred_next_obs_i = self.dyn_models[i](inputs[:, i, :])
-                print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
-                print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
-                print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
+                # print(f"Agent{i} Predicted next observation0: {pred_next_obs_i[0:10]}")
+                # print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
+                # print(f'pred_next_obs_i shape: {pred_next_obs_i.shape}')
                 pred_next_obs_all.append(pred_next_obs_i)
 
             assert n_agents == len(pred_next_obs_all)
             # dyn_models_loss = []
 
             for i, pred_next_obs in enumerate(pred_next_obs_all):
-                print(f'pred_next_obs: {pred_next_obs[:, train_start_index:train_end_index].shape}')
-                print(f'next_obs_batch: {next_obs_batch[:, i, train_start_index:train_end_index].shape}')
+                # print(f'pred_next_obs: {pred_next_obs[:, train_start_index:train_end_index].shape}')
+                # print(f'next_obs_batch: {next_obs_batch[:, i, train_start_index:train_end_index].shape}')
                 agent_i_dyn_loss = torch.nn.functional.mse_loss(pred_next_obs[:, train_start_index:train_end_index], to_torch(next_obs_batch[:, i, train_start_index:train_end_index]))
                 self.dyn_models[i].zero_grad()
                 agent_i_dyn_loss.backward()
                 self.dyn_model_optims[i].step()
-                print(f"Agent{i} dyn model loss: {agent_i_dyn_loss}")
+                # print(f"Agent{i} dyn model loss: {agent_i_dyn_loss}")
                 # dyn_models_loss.append(agent_i_dyn_loss)
                 if episode is not None:
                     episode.custom_metrics[f"agent {i}/dyn_models_loss"] = agent_i_dyn_loss.item()
@@ -564,12 +567,12 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                     common_neighbors.append(list(set(agent_t) & set(agent_t1)))
                 common_neighbors_batch.append(common_neighbors)
 
-            vf = self.model.value_function()
-            print(f'vf thingy: {vf.shape}')
-
+            # vf = self.model.value_function()
+            # print(f'vf thingy: {vf.shape}')
+            # pp = pprint.PrettyPrinter(indent=4)
             intr_rew_weighting = self.config["model"]["custom_model_config"].get('intr_rew_weighting', 'average')
-            print(f'selected weighting: {intr_rew_weighting}')
-            print(f"Common neighbors batch: {common_neighbors_batch[:10]}")
+            # print(f'selected weighting: {intr_rew_weighting}')
+            # print(f"Common neighbors batch: {common_neighbors_batch[:10]}")
             for batch_idx, batch_data in enumerate(common_neighbors_batch):
                 intr_rew_agent = []
                 for cur_agent_idx, neighbors in enumerate(batch_data):
@@ -584,14 +587,22 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                             # TODO: Find a way to send data in batches
                             neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
                             true_next_obs = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
-                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs) * dist_inv if intr_rew_weighting == 'distance' else 1)
+                            # pp.pprint(f"cur_agent_idx: {cur_agent_idx}, neighbor: {neighbor}")
+                            # pp.pprint(f"neighbor_pred ({neighbor_pred.shape}): {neighbor_pred}")
+                            # pp.pprint(f"true_next_obs ({true_next_obs.shape}): {true_next_obs}")
+                            # pp.pprint(f"mse loss: {torch.nn.functional.mse_loss(neighbor_pred, true_next_obs)}")
+                            l2_loss += torch.nn.functional.mse_loss(neighbor_pred, true_next_obs) * (dist_inv if intr_rew_weighting == 'distance' else 1)
+                            # print(f"l2_loss: {l2_loss}")
                     # log this l2 loss
                     if intr_rew_weighting == 'distance' and total_dist_inv > 0:
-                        intr_rew_agent.append(-l2_loss / total_dist_inv)
+                        intr_rew_agent.append(float(-l2_loss / total_dist_inv))
                     else:
-                        intr_rew_agent.append(-l2_loss / len(neighbors))
+                        intr_rew_agent.append(float(-l2_loss / len(neighbors)))
+                # pp.pprint(f"intr_rew_agent ({len(intr_rew_agent)}): {intr_rew_agent}")
                 intr_rew_batch.append(intr_rew_agent)
+            # pp.pprint(f"intr_rew_batch ({intr_rew_batch}): {intr_rew_batch}")
             intr_rew_t = torch.FloatTensor(intr_rew_batch)
+            # pp.pprint(f"intr_rew_t ({intr_rew_t.shape}): {intr_rew_t}")
         
         elif self.alignment_type == "self" and episode is not None and intr_rew_beta > 0:
             for cur_agent_idx in range(n_agents):
