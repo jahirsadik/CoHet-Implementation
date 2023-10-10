@@ -438,14 +438,14 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         #  `PPOConfig`?.
         self.alignment_type = config["model"]["custom_model_config"].get("alignment_type", None)
         self.use_gppo_dyn = config["model"]["custom_model_config"].get("use_gppo_dyn", False)
-        embedding_dim = config["model"]["custom_model_config"]["embedding_dim"]
+        self.embedding_dim = config["model"]["custom_model_config"]["embedding_dim"]
         if self.alignment_type is not None:
             obs_dim = observation_space.shape[0] // len(action_space) # obs space / no of agents
             act_dim = action_space[0].shape[0]  # action space shape[0] = no of agents
             self.dyn_models = [WorldModel(num_agent = len(action_space), 
                                             layer_num= config["model"]["custom_model_config"].get("dyn_model_layer_num", 2), 
-                                            input_dim = (embedding_dim + act_dim) if self.use_gppo_dyn else (obs_dim + act_dim), # TODO @deeparghya check
-                                            output_dim = embedding_dim if self.use_gppo_dyn else obs_dim, # TODO @deeparghya what instead of 128?
+                                            input_dim = (self.embedding_dim + act_dim) if self.use_gppo_dyn else (obs_dim + act_dim), # TODO @deeparghya check
+                                            output_dim = self.embedding_dim if self.use_gppo_dyn else obs_dim, # TODO @deeparghya what instead of 128?
                                             hidden_units = config["model"]["custom_model_config"].get("dyn_model_hidden_units", 128), 
                                             device=config["env_config"]["device"]).to(config["env_config"]["device"])
                             for _ in range(len(action_space))]
@@ -500,7 +500,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         n_agents = len(self.action_space)   # total no of agents
         intr_rew_t = torch.zeros((batch_size, n_agents)) # Initialize empty torch first, to be changed later
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1))
-        default_beta = 1 / 128 if self.use_gppo_dyn else 1 / cur_obs_batch.shape[2]
+        default_beta = 1 / self.embedding_dim if self.use_gppo_dyn else 1 / cur_obs_batch.shape[2]
         intr_rew_beta =  self.config["model"]["custom_model_config"].get("intr_rew_beta", default_beta)
         intr_beta_type = self.config["model"]["custom_model_config"].get("intr_beta_type", "normal")
         
@@ -542,7 +542,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             for i in range(n_agents):
                 pred_next_obs_or_h_i = self.dyn_models[i](inputs[:, i, :])
                 # print(f"Agent{i} Predicted next observation0: {pred_next_obs_or_h_i[0:10]}")
-                # print(f"Agent{i} True next observation0: {to_torch(next_obs_batch[0:10, i, :])}")
+                print(f"Agent{i} True current observation: {to_torch(cur_obs_batch[0:10, i, :])}")
                 # print(f'pred_next_obs_or_h_i shape: {pred_next_obs_or_h_i.shape}')
                 pred_next_obs_or_h_all.append(pred_next_obs_or_h_i)
 
@@ -618,7 +618,7 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                                 neighbor_pred = self.dyn_models[neighbor](cur_obs_act_batch[batch_idx, cur_agent_idx, :].view(1, -1))
                                 true_next_obs_or_h = to_torch(next_obs_batch[batch_idx, cur_agent_idx, :].reshape(1, -1))
                                 
-                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs_or_h) * dist_inv if intr_rew_weighting == 'distance' else 1)
+                            l2_loss += (torch.nn.functional.mse_loss(neighbor_pred, true_next_obs_or_h) * (dist_inv if intr_rew_weighting == 'distance' else 1))
                     # log this l2 loss
                     if intr_rew_weighting == 'distance' and total_dist_inv > 0:
                         intr_rew_agent.append(-l2_loss / total_dist_inv)
