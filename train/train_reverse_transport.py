@@ -90,7 +90,7 @@ def train(
             )
         ],
         local_dir=str(PathUtils.scratch_dir / "ray_results" / scenario_name),
-        stop={"training_iteration": 5000},
+        stop={"training_iteration": 1300},
         restore=str(checkpoint_path) if restore else None,
         config={
             "seed": seed,
@@ -166,10 +166,10 @@ def train(
                 # Env specific
                 # scenario config checked
                 "scenario_config": {
-                    "n_agents": 6,
+                    "n_agents": 3,
                     "package_width": 1.0,
                     "package_length": 0.5,
-                    "package_mass": 10,
+                    "package_mass": 1,
                 },
             },
             "evaluation_interval": 20,
@@ -197,9 +197,9 @@ def train(
 if __name__ == "__main__":
     TrainingUtils.init_ray(scenario_name=scenario_name, local_mode=ON_MAC)
 
-    for seed in [0]:
+    for type in ["self", "team"]:
         train(
-            seed=seed,
+            seed=0,
             restore=False,
             notes="",
             # Model important
@@ -213,13 +213,13 @@ if __name__ == "__main__":
             aggr="add",
             topology_type=None,
             # cohet
-            alignment_type="team",
-            comm_radius=1.25,
+            alignment_type=type,
+            comm_radius=0.65,
             dyn_model_hidden_units=128,
             dyn_model_layer_num=2,
-            intr_rew_beta=15,
-            intr_beta_type="percent",
-            intr_rew_weighting="distance",
+            intr_rew_beta=30,
+            intr_beta_type="normal",
+            intr_rew_weighting="average",
             # cohet end
             # Env
             max_episode_steps=200,
