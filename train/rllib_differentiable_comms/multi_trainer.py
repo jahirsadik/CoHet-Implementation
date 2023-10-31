@@ -118,6 +118,7 @@ def standardize_fields(samples: SampleBatchType, fields: List[str]) -> SampleBat
 def compute_gae_for_sample_batch(
     policy: Policy,
     sample_batch: SampleBatch,
+    original_batch: SampleBatch,
     other_agent_batches: Optional[Dict[AgentID, SampleBatch]] = None,
     episode: Optional[Episode] = None,
 ) -> SampleBatch:
@@ -143,69 +144,20 @@ def compute_gae_for_sample_batch(
     """
     n_agents = len(policy.action_space)
 
-    if sample_batch[SampleBatch.INFOS].dtype == "float32":
-        # The trajectory view API will pass populate the info dict with a np.zeros((ROLLOUT_SIZE,))
-        # array in the first call, in that case the dtype will be float32, and we
-        # ignore it by assignining it to all agents
-        samplebatch_infos_rewards = concat_samples(
-            [
-                SampleBatch(
-                    {
-                        str(i): sample_batch[SampleBatch.REWARDS].copy()
-                        for i in range(n_agents)
-                    }
-                )
-            ]
-        )
-    else:
-        #  For regular calls, we extract the rewards from the info
-        #  dict into the samplebatch_infos_rewards dict, which now holds the rewards
-        #  for all agents as dict.
-        # sample_batch[SampleBatch.INFOS] = list of len ROLLOUT_SIZE of which every element is
-        # {'rewards': {0: -0.077463925, 1: -0.0029145998, 2: -0.08233316}} if there are 3 agents
-        samplebatch_infos_rewards = concat_samples(
-            [
-                SampleBatch({str(k): [np.float32(v)] for k, v in s["rewards"].items()})
-                for s in sample_batch[SampleBatch.INFOS]
-                # s = {'rewards': {0: -0.077463925, 1: -0.0029145998, 2: -0.08233316}} if there are 3 agents
-            ]
-        )
-
-        # samplebatch_infos_rewards = SampleBatch(ROLLOUT_SIZE: ['0', '1', '2']) if there are 3 agents
-        # (i.e. it has ROLLOUT_SIZE entries with keys '0','1','2')
-
-    if not isinstance(policy.action_space, gym.spaces.tuple.Tuple):
-        raise InvalidActionSpace("Expect tuple action space")
-
-    keys_to_overwirte = [
-        SampleBatch.REWARDS,
-        SampleBatch.VF_PREDS,
+    keys_to_overwrite = [
         Postprocessing.ADVANTAGES,
         Postprocessing.VALUE_TARGETS,
     ]
 
-    original_batch = sample_batch.copy()
-
-    # We prepare the sample batch to contain the agent batches
-    for k in keys_to_overwirte:
-        sample_batch[k] = np.zeros((len(original_batch), n_agents), dtype=np.float32)
-
-    if original_batch[SampleBatch.DONES][-1]:
-        all_values = None
-    else:
-        input_dict = original_batch.get_single_step_input_dict(
-            policy.model.view_requirements, index="last"
-        )
-        all_values = policy._value(**input_dict)
-
     # Create the sample_batch for each agent
-    for key in samplebatch_infos_rewards.keys():
-        agent_index = int(key)
-        sample_batch_agent = original_batch.copy()
-        sample_batch_agent[SampleBatch.REWARDS] = samplebatch_infos_rewards[key]
-        sample_batch_agent[SampleBatch.VF_PREDS] = original_batch[SampleBatch.VF_PREDS][
-            :, agent_index
-        ]
+    for agent_index in range(0, n_agents):
+        if original_batch[SampleBatch.DONES][-1]:
+            all_values = None
+        else:
+            input_dict = original_batch.get_single_step_input_dict(
+                policy.model.view_requirements, index="last"
+            )
+            all_values = policy._value(**input_dict)
 
         if all_values is None:
             last_r = 0.0
@@ -216,6 +168,10 @@ def compute_gae_for_sample_batch(
                 if policy.config["use_gae"]
                 else all_values
             )
+
+        sample_batch_agent = sample_batch.copy()
+        sample_batch_agent[SampleBatch.REWARDS] = sample_batch[SampleBatch.REWARDS][:, agent_index]
+        sample_batch_agent[SampleBatch.VF_PREDS] = sample_batch[SampleBatch.VF_PREDS][:, agent_index]
 
         # Adds the policy logits, VF preds, and advantages to the batch,
         # using GAE ("generalized advantage estimation") or not.
@@ -228,7 +184,7 @@ def compute_gae_for_sample_batch(
             use_critic=policy.config.get("use_critic", True),
         )
 
-        for k in keys_to_overwirte:
+        for k in keys_to_overwrite:
             sample_batch[k][:, agent_index] = sample_batch_agent[k]
 
     return sample_batch
@@ -475,8 +431,70 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
         self, sample_batch, other_agent_batches=None, episode=None
     ):
         
-        with torch.no_grad():
-            sample_batch = compute_gae_for_sample_batch(self, sample_batch, other_agent_batches, episode)
+        n_agents = len(self.action_space)   # total no of agents
+        
+        if sample_batch[SampleBatch.INFOS].dtype == "float32":
+            # The trajectory view API will pass populate the info dict with a np.zeros((ROLLOUT_SIZE,))
+            # array in the first call, in that case the dtype will be float32, and we
+            # ignore it by assignining it to all agents
+            samplebatch_infos_rewards = concat_samples(
+                [
+                    SampleBatch(
+                        {
+                            str(i): sample_batch[SampleBatch.REWARDS].copy()
+                            for i in range(n_agents)
+                        }
+                    )
+                ]
+            )
+        else:
+            #  For regular calls, we extract the rewards from the info
+            #  dict into the samplebatch_infos_rewards dict, which now holds the rewards
+            #  for all agents as dict.
+            # sample_batch[SampleBatch.INFOS] = list of len ROLLOUT_SIZE of which every element is
+            # {'rewards': {0: -0.077463925, 1: -0.0029145998, 2: -0.08233316}} if there are 3 agents
+            samplebatch_infos_rewards = concat_samples(
+                [
+                    SampleBatch({str(k): [np.float32(v)] for k, v in s["rewards"].items()})
+                    for s in sample_batch[SampleBatch.INFOS]
+                    # s = {'rewards': {0: -0.077463925, 1: -0.0029145998, 2: -0.08233316}} if there are 3 agents
+                ]
+            )
+
+        # samplebatch_infos_rewards = SampleBatch(ROLLOUT_SIZE: ['0', '1', '2']) if there are 3 agents
+        # (i.e. it has ROLLOUT_SIZE entries with keys '0','1','2')
+        
+        if not isinstance(self.action_space, gym.spaces.tuple.Tuple):
+            raise InvalidActionSpace("Expect tuple action space")
+
+        keys_to_overwrite = [
+            SampleBatch.REWARDS,
+            SampleBatch.VF_PREDS,
+        ]
+
+        keys_to_create = keys_to_overwrite + [
+            Postprocessing.ADVANTAGES,
+            Postprocessing.VALUE_TARGETS,
+        ]
+
+        original_batch = sample_batch.copy()
+
+        # We prepare the sample batch to contain the agent batches
+        for k in keys_to_create:
+            sample_batch[k] = np.zeros((len(original_batch), n_agents), dtype=np.float32)
+
+        # Create the sample_batch for each agent
+        for key in samplebatch_infos_rewards.keys():
+            agent_index = int(key)
+            sample_batch_agent = original_batch.copy()
+            sample_batch_agent[SampleBatch.REWARDS] = samplebatch_infos_rewards[key]
+            sample_batch_agent[SampleBatch.VF_PREDS] = original_batch[SampleBatch.VF_PREDS][
+                :, agent_index
+            ]
+
+            for k in keys_to_overwrite:
+                sample_batch[k][:, agent_index] = sample_batch_agent[k]
+
         # WM stats here
         dyn_losses_t = self.model.tower_stats.get('dyn_models_loss', None)
         if torch.is_tensor(dyn_losses_t):
@@ -485,7 +503,6 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
                 episode.custom_metrics[f'agent {cur_agent_idx}/dyn_model_loss'] = dyn_loss
 
         batch_size = len(sample_batch)
-        n_agents = len(self.action_space)   # total no of agents
         intr_rew_t = torch.zeros((batch_size, n_agents)) # Initialize empty torch first, to be changed later
         cur_obs_batch = sample_batch[SampleBatch.OBS].reshape((batch_size, n_agents, -1))
         intr_rew_beta =  self.config["model"]["custom_model_config"].get("intr_rew_beta", (1 / cur_obs_batch.shape[2]))
@@ -658,6 +675,9 @@ class MultiPPOTorchPolicy(PPOTorchPolicy, MultiAgentValueNetworkMixin):
             print(f'sample batch rew before adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
             sample_batch[SampleBatch.REWARDS] += intr_rew_t.detach().cpu().numpy()
             print(f'sample batch rew after adding int rew: \n{sample_batch[SampleBatch.REWARDS][0]}')
+
+        with torch.no_grad():
+            sample_batch = compute_gae_for_sample_batch(self, sample_batch, original_batch, other_agent_batches, episode)
 
         return sample_batch
 
