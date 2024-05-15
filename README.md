@@ -14,6 +14,5 @@ conditions of reward sparsity and partial observability. Evaluation of CoHet in 
 Multi-agent Particle Environment (MPE) and Vectorized Multi-Agent Simulator (VMAS) 
 demonstrate that it outperforms the state-of-the-art in a wide range of cooperative 
 multi-agent scenarios. Our research is supplemented by an analysis of the impact of
-our agent dynamics model on the intrinsic motivation (IM) module, how it facilitates 
-learning under reward sparsity, and its scalability with an increasing number of 
-heterogeneous agents.
+our agent dynamics model on the intrinsic motivation (IM) module, how the two different
+variants of CoHet perform, and its scalability with an increasing number of heterogeneous agents.
