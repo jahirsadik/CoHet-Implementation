@@ -180,7 +180,7 @@ We welcome contributions to the CoHet project! Please open an issue or submit a 
 
 ## Contact
 
-For any inquiries, please contact [Jahir Sadik Monon](mailto:jahirsadikmonon@gmail.com).
+For any inquiries, please contact [Jahir Sadik Monon](https://jahirsadik.github.io/).
 
 ## Acknowledgements
 
